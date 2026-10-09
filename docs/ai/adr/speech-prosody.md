@@ -131,6 +131,19 @@ Cyrillic words use a built-in rule table without a dependency:
 - A doubled consonant gives ッ, or ン for нн.
 - Stress is unknown, so each vowel keeps its written quality. Спасибо becomes スパシボ, not スパシーバ.
 
+French phrases use a built-in rule table. kanalizer reads French with English rules, as in croissant → クロワッサント.
+The owner chose these rules over a variant that holds the last syllable, as in メルシーボクー.
+
+- A phrase is French when a word has a French accent, starts with an elision such as c' or l', or is in `FRENCH_WORDS`.
+  The list holds words that are rare in English, such as la, je, très, merci, and croissant. Other Latin phrases keep the English path.
+- A final mute e and most final consonants are silent. They still decide the letters before them: rose → ロズ and madame → マダム.
+- Nasal vowels are the vowel plus ン: an and en → アン, on → オン, in and ain → アン.
+- ou, oi, eau, au, ai, and eu are single sounds. u is ュ, as in nuit → ニュイ.
+- ch, gn, qu, soft c and g, and s between vowels follow French spelling.
+- A doubled consonant gives ッ, as in croissant → クロワッサン. The ill and eil endings give イユ, as in soleil → ソレイユ.
+- Elision joins the consonant to the next word: c'est → セ and l'amour → ラムール. A final r gives ール, as in amour → アムール.
+- `FRENCH_EXCEPTIONS` holds irregular words, such as monsieur → ムッシュー.
+
 The ENGINE gives each converted word accent 1 at the NJD level. Core 0.17 accepts only text or kana, so the katakana uses the OpenJTalk default accent.
 `kanalizer==0.1.1` is installed in `.local/voicevox/venv` from the hash-pinned `win_amd64` wheel.
 
@@ -267,6 +280,16 @@ Three new native tests cover these foreign word cases:
 - The Cyrillic rules for е, ё, ю, я, й, ь, ъ, palatalization, and doubled consonants.
 - A line with only Cyrillic gives audio in both modes for styles 8 and 60.
 
+French rules, added 2026-10-09:
+
+| Command | Result |
+| --- | --- |
+| Comparison of the server rules with the approved preview builder on 123 French words | Passed. 0 differences in katakana and French detection. |
+| Native parity command above | Passed. 20 tests. J remains byte-identical: 878,240 samples, maximum difference 0. |
+| Comparison of the server plans with approved reel B for style 60 in J mode | Passed. 8 of 8 lines give byte-identical audio. |
+
+One new native test covers the approved preview lines, word rules, and French detection. English phrases stay on the kanalizer path.
+
 ## Follow-up
 
 Compare live speech with the J reel by listening.
@@ -278,6 +301,7 @@ Listen to the shy profile in live chat. The previews used fixed test lines.
 Restart the local speech server to load the foreign word rewrite.
 kanalizer misreads some words, for example cafe → ケーフ. OpenJTalk knows cafe, so café reads カフェ.
 The Cyrillic table has no stress or vowel reduction. A Russian stress dictionary needs a separate decision.
+The French rules read verbs in -ent as nasal, as in parlent → パルラン. A French word without a cue goes to kanalizer.
 
 ## Sung hum
 

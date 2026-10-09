@@ -107,6 +107,41 @@ CYRILLIC_HARD, CYRILLIC_SOFT = "аыуэо", "яиюеё"
 # A vowel letter that starts a syllable. A soft vowel adds the y glide: я is ya, е is ye, ё is yo, ю is yu.
 CYRILLIC_VOWELS = {"а": "ア", "ы": "イ", "у": "ウ", "э": "エ", "о": "オ", "я": "ヤ", "и": "イ", "ю": "ユ", "е": "イェ", "ё": "ヨ"}
 CYRILLIC_Y = {"а": "ヤ", "у": "ユ", "о": "ヨ", "э": "イェ"}
+# kanalizer reads French with English rules, as in croissant → クロワッサント. French phrases use their own rules.
+# A phrase is French when it has a French accent, an elision such as c' or l', or a word from this list.
+# Each listed word is rare as an English word.
+FRENCH_ACCENTS = re.compile(r"[àâçéèêëîïôûùüÿœæ]")
+FRENCH_ELISION = re.compile(r"^(?:qu|[cdjlmnst])'")
+FRENCH_WORDS = {
+    "le", "la", "les", "des", "du", "une", "je", "tu", "il", "elle", "nous", "vous", "ils", "elles",
+    "est", "et", "très", "avec", "pour", "dans", "mon", "ma", "mes", "ton", "ta", "qui", "que", "pas", "au", "aux",
+    "oui", "merci", "bonjour", "bonsoir", "salut", "voilà", "voila", "beaucoup", "toujours", "bien",
+    "monsieur", "madame", "mademoiselle", "croissant", "amour", "vie", "rien", "ça",
+}
+FRENCH_EXCEPTIONS = {
+    "monsieur": "ムッシュー", "femme": "ファム", "oui": "ウィ", "ville": "ヴィル", "mille": "ミル", "fils": "フィス",
+    "est": "エ", "et": "エ",
+}
+# Each consonant has a row for the vowels a i u(ou) e o y(u) ə, then a bare form. ø uses the ə column.
+FRENCH_COLUMNS = {"a": 0, "i": 1, "u": 2, "e": 3, "o": 4, "y": 5, "ə": 6, "ø": 6}
+FRENCH_CONSONANTS = {
+    "p": "パ ピ プ ペ ポ ピュ プ プ", "b": "バ ビ ブ ベ ボ ビュ ブ ブ",
+    "t": "タ ティ トゥ テ ト テュ トゥ ト", "d": "ダ ディ ドゥ デ ド デュ ドゥ ド",
+    "k": "カ キ ク ケ コ キュ ク ク", "g": "ガ ギ グ ゲ ゴ ギュ グ グ",
+    "f": "ファ フィ フ フェ フォ フュ フ フ", "v": "ヴァ ヴィ ヴ ヴェ ヴォ ヴュ ヴ ヴ",
+    "s": "サ シ ス セ ソ シュ ス ス", "z": "ザ ジ ズ ゼ ゾ ジュ ズ ズ",
+    "ʃ": "シャ シ シュ シェ ショ シュ シュ シュ", "ʒ": "ジャ ジ ジュ ジェ ジョ ジュ ジュ ジュ",
+    "m": "マ ミ ム メ モ ミュ ム ム", "n": "ナ ニ ヌ ネ ノ ニュ ヌ ヌ", "ɲ": "ニャ ニ ニュ ニェ ニョ ニュ ニュ ニュ",
+    "l": "ラ リ ル レ ロ リュ ル ル", "r": "ラ リ ル レ ロ リュ ル ル",
+}
+FRENCH_VOWELS = {"a": "ア", "i": "イ", "u": "ウ", "e": "エ", "o": "オ", "y": "ユ", "ə": "ウ", "ø": "ウ"}
+# Nasal vowels ã (an, en), õ (on), and ẽ (in, ain) are the oral vowel plus ン.
+FRENCH_NASALS = {"ã": "a", "õ": "o", "ẽ": "a"}
+FRENCH_GLIDE_J = {"a": "ヤ", "u": "ユ", "y": "ユ", "o": "ヨ", "e": "イェ", "ə": "ユ", "ø": "ユ", "i": "イ"}
+FRENCH_GLIDE_W = {"a": "ワ", "ẽ": "ワン", "i": "ウィ", "e": "ウェ"}
+FRENCH_GEMINATES = set("ptkfsb")
+FRENCH_VOWEL_LETTERS = set("aeiouyàâéèêëîïôûùüÿœæ")
+FRENCH_SOFTENERS = set("eéèêiïy")
 
 
 def read_prosody(text):
@@ -162,6 +197,160 @@ def cyrillic_to_katakana(word):
     return "".join(out)
 
 
+def french_spoken_end(w):
+    """French drops a final mute e and most final consonants. A final e before a dropped consonant is é, as in chez."""
+    dropped = False
+    vowel_before_last = lambda s: any(c in FRENCH_VOWEL_LETTERS for c in s[:-1])
+    if w.endswith("es") and vowel_before_last(w[:-1]):
+        w, dropped = w[:-2], True
+    elif w.endswith("e") and vowel_before_last(w):
+        return w[:-1]
+    while len(w) > 1 and w[-1] in "dtsxzpg":
+        w, dropped = w[:-1], True
+    if dropped and w.endswith("e"):
+        return w[:-1] + "é"
+    if len(w) > 3 and w.endswith("er"):
+        return w[:-2] + "é"
+    return w
+
+
+def french_grapheme(w, i, end):
+    """Phonemes and letter count of the French spelling unit at i. Letters from end on are silent."""
+    rest, c = w[i:end], w[i]
+    vowel_at = lambda k: k < len(w) and w[k] in FRENCH_VOWEL_LETTERS
+    # A glide needs a spoken vowel after it. The mute e of vie is not one.
+    spoken_vowel_at = lambda k: k < end and w[k] in FRENCH_VOWEL_LETTERS
+    nasal = lambda n: not vowel_at(i + n) and w[i + n:i + n + 1] not in ("n", "m")
+    if rest.startswith("eau"):
+        return ["o"], 3
+    if rest.startswith("oin") and nasal(3):
+        return ["w", "ẽ"], 3
+    if rest.startswith(("oi", "oî", "oy")):
+        return ["w", "a"], 2
+    if rest.startswith(("ou", "où", "oû")):
+        return ["w" if spoken_vowel_at(i + 2) else "u"], 2
+    if rest.startswith("au"):
+        return ["o"], 2
+    if rest.startswith(("ain", "ein")) and nasal(3):
+        return ["ẽ"], 3
+    if rest.startswith(("aill", "eill")):
+        return [c, "j"], 4
+    if rest.startswith(("ail", "eil")) and not vowel_at(i + 3):
+        return [c, "j"], 3
+    if rest.startswith(("ai", "aî", "ei")):
+        return ["e"], 2
+    if rest.startswith("oeu"):
+        return ["ø"], 3
+    if rest.startswith(("eu", "œu", "eû")):
+        return ["ø"], 2
+    if c == "œ":
+        return ["ø"], 1
+    if rest.startswith("ien") and nasal(3):
+        return ["j", "ẽ"], 3
+    if rest[:2] in ("an", "am", "en", "em") and nasal(2):
+        return ["ã"], 2
+    if rest[:2] in ("on", "om") and nasal(2):
+        return ["õ"], 2
+    if rest[:2] in ("in", "im", "yn", "ym", "un", "um") and nasal(2):
+        return ["ẽ"], 2
+    if rest.startswith("ill") and i > 0 and not vowel_at(i - 1):
+        return ["i", "j"], 3
+    digraph = {"gn": "ɲ", "ch": "ʃ", "ph": "f", "th": "t", "qu": "k"}.get(rest[:2])
+    if digraph:
+        return [digraph], 2
+    if rest.startswith("gu") and i + 2 < len(w) and w[i + 2] in FRENCH_SOFTENERS:
+        return ["g"], 2
+    soft = i + 1 < len(w) and w[i + 1] in FRENCH_SOFTENERS
+    if c in "cg":
+        return [("s" if c == "c" else "ʒ") if soft else ("k" if c == "c" else "g")], 1
+    if c == "s":
+        return ["z" if i > 0 and vowel_at(i - 1) and vowel_at(i + 1) else "s"], 1
+    if c == "e":
+        # Closed by two consonants, or by the last consonant, e is è. Before one consonant and a vowel it is mute.
+        after = w[i + 1:end]
+        consonants = len(after) - len(after.lstrip("bcdfghjklmnpqrstvwxz"))
+        return ["e" if after and (consonants >= 2 or consonants == len(after)) else "ə"], 1
+    if c in "iîï":
+        return ["j" if i > 0 and spoken_vowel_at(i + 1) else "i"], 1
+    letter = {"ç": "s", "j": "ʒ", "x": "ks", "h": "", "y": "i"}.get(c)
+    for vowel, letters in (("a", "aàâ"), ("e", "éèêë"), ("o", "oô"), ("y", "uûùü")):
+        if c in letters:
+            letter = vowel
+    if letter is None:
+        letter = c if c in FRENCH_CONSONANTS else ""
+    return list(letter), 1
+
+
+def french_to_katakana(word):
+    """French spelling to katakana. Elision joins the consonant to the next word: l'amour is ラムール and c'est is セ."""
+    word = unicodedata.normalize("NFC", word.lower()).replace("’", "'")
+    if word in FRENCH_EXCEPTIONS:
+        return FRENCH_EXCEPTIONS[word]
+    word = word.replace("'", "")
+    # Silent letters are not spoken, but they still decide the letters before them, as in rose and madame.
+    end = len(french_spoken_end(word))
+    w, ph, i = french_spoken_end(word) + word[end:], [], 0
+    while i < end:
+        phones, size = french_grapheme(w, i, end)
+        ph += phones
+        i += size
+    out, i = [], 0
+    while i < len(ph):
+        p, nxt = ph[i], ph[i + 1] if i + 1 < len(ph) else None
+        step = 1
+        if p in FRENCH_CONSONANTS:
+            row = FRENCH_CONSONANTS[p].split()
+            if nxt == p and p in FRENCH_GEMINATES:
+                out.append("ッ")
+            elif nxt in FRENCH_COLUMNS:
+                out.append(row[FRENCH_COLUMNS[nxt]])
+                step = 2
+            elif nxt in FRENCH_NASALS:
+                out.append(row[FRENCH_COLUMNS[FRENCH_NASALS[nxt]]] + "ン")
+                step = 2
+            elif nxt == "w":
+                out.append(row[4])
+            elif nxt == "j":
+                out.append(row[1])
+            elif p == "r" and nxt is None and out:
+                # A final r holds the vowel before it: amour is アムール.
+                out.append("ール")
+            else:
+                out.append(row[7])
+        elif p == "w":
+            out.append(FRENCH_GLIDE_W.get(nxt, "ウ"))
+            step = 2 if nxt in FRENCH_GLIDE_W else 1
+        elif p == "j":
+            after_i = bool(out) and out[-1][-1] in "イキシチニヒミリギジビピィ"
+            step = 2
+            # After an i sound the glide is already heard: bien is ビアン and avion is アヴィオン.
+            if after_i and nxt in FRENCH_NASALS:
+                out.append(FRENCH_VOWELS[FRENCH_NASALS[nxt]] + "ン")
+            elif after_i and nxt in FRENCH_VOWELS:
+                out.append(FRENCH_VOWELS[nxt])
+            elif nxt in FRENCH_NASALS:
+                out.append("ヨン" if nxt == "õ" else "ヤン")
+            elif nxt in FRENCH_GLIDE_J:
+                out.append(FRENCH_GLIDE_J[nxt])
+            else:
+                out.append("イユ")
+                step = 1
+        elif p in FRENCH_NASALS:
+            out.append(FRENCH_VOWELS[FRENCH_NASALS[p]] + "ン")
+        elif p in FRENCH_VOWELS:
+            out.append(FRENCH_VOWELS[p])
+        i += step
+    return "".join(out)
+
+
+def is_french(words):
+    for w in words:
+        low = unicodedata.normalize("NFC", unicodedata.normalize("NFKC", w).lower()).replace("’", "'")
+        if FRENCH_ACCENTS.search(low) or FRENCH_ELISION.match(low) or low in FRENCH_WORDS:
+            return True
+    return False
+
+
 def latin_letters(word):
     """ASCII letters only. NFKD removes accents and NFKC makes full-width letters ASCII. Can't becomes cant."""
     plain = unicodedata.normalize("NFKD", unicodedata.normalize("NFKC", word))
@@ -180,7 +369,7 @@ def english_to_katakana(word):
 
 
 class ForeignReading:
-    """Rewrites Latin and Cyrillic phrases in the text that OpenJTalk receives. Captions never see this text."""
+    """Rewrites English, French, and Russian phrases in the text that OpenJTalk receives. Captions never see this text."""
 
     def __init__(self, analyze):
         self.analyze = analyze
@@ -194,7 +383,10 @@ class ForeignReading:
         return self.reading(word) == self.reading("".join(LETTER_NAMES[c.upper()] for c in word))
 
     def latin_phrase(self, match):
-        words = [w for w in map(latin_letters, re.split(FOREIGN_SPACE, match[0])) if w]
+        raw = [w for w in re.split(FOREIGN_SPACE, match[0]) if w]
+        if raw and is_french(raw):
+            return "".join(french_to_katakana(unicodedata.normalize("NFKC", w)) for w in raw)
+        words = [w for w in map(latin_letters, raw) if w]
         if not words:
             return match[0]
         kana, converted = [], False

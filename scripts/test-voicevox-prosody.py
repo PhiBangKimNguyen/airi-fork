@@ -238,6 +238,35 @@ class ProsodyTests(unittest.TestCase):
         self.assertEqual(self.voice.foreign.speakable("Спасибо、ありがとう。"), "スパシボ、ありがとう。")
         self.assertEqual(self.voice.foreign.speakable("Спасибо большое！"), "スパシボボリショイェ！")
 
+    def test_french_phrases_use_french_rules(self):
+        foreign = self.voice.foreign
+        lines = {
+            "Merci beaucoup！": "メルシボク！",
+            "「La vie en rose」っていい曲だね。": "「ラヴィアンロズ」っていい曲だね。",
+            "C'est très bien、ありがとう。": "セトレビアン、ありがとう。",
+            "Bonjour、元気？": "ボンジュール、元気？",
+            "このcroissant、おいしいね。": "このクロワッサン、おいしいね。",
+            "Je t'aime、なんてね。": "ジュテム、なんてね。",
+            "カフェでcrème brûléeを食べたよ。": "カフェでクレムブリュレを食べたよ。",
+        }
+        for line, spoken in lines.items():
+            self.assertEqual(foreign.speakable(line), spoken, line)
+        words = {
+            # Silent letters, nasal vowels, and glides.
+            "petit": "プティ", "croissant": "クロワッサン", "vin": "ヴァン", "chanson": "シャンソン", "bonsoir": "ボンソワール",
+            "bien": "ビアン", "avion": "アヴィオン", "nuit": "ニュイ", "soleil": "ソレイユ", "chez": "シェ", "parler": "パルレ",
+            # A silent final e still decides the letters before it.
+            "rose": "ロズ", "madame": "マダム", "rouge": "ルジュ", "baguette": "バゲット",
+            "l'amour": "ラムール", "qu'il": "キル", "monsieur": "ムッシュー", "oui": "ウィ",
+        }
+        for word, kana in words.items():
+            self.assertEqual(voicevox.french_to_katakana(word), kana, word)
+        self.assertTrue(voicevox.is_french(["café"]))
+        self.assertTrue(voicevox.is_french(["C'est"]))
+        self.assertTrue(voicevox.is_french(["La", "vie"]))
+        for english in (["Can't", "take"], ["Taylor", "Swift"], ["YouTube"], ["Jazz"]):
+            self.assertFalse(voicevox.is_french(english), english)
+
     def test_foreign_text_is_planned_in_both_modes(self):
         # OpenJTalk rejects a line with only Cyrillic. Both modes and the shy profile plan its katakana.
         line, spoken = "Спасибо большое！", "スパシボボリショイェ！"
