@@ -34,7 +34,12 @@ describe('hybrid gateway', () => {
       if (String(input).startsWith('https://api.cloudflare.com/')) {
         const body = JSON.parse(String(options?.body))
         requests.push(body)
-        const decision = body.model === 'test-vision' ? { summary: 'Synthetic cat.', interesting: true } : { action: 'speak', text: '猫だね。', translation: 'A cat.' }
+        const rendering = body.response_format?.json_schema?.name === 'english_rendering'
+        let decision: unknown = { action: 'speak', text: '猫だね。', translation: 'A cat.' }
+        if (body.model === 'test-vision')
+          decision = { summary: 'Synthetic cat.', interesting: true }
+        else if (rendering)
+          decision = { translation: 'It\'s a cat.' }
         return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }))
       }
       return nativeFetch(input, options)
@@ -52,12 +57,48 @@ describe('hybrid gateway', () => {
     expect(response.headers.get('content-type')).toBe('text/event-stream')
     const stream = await response.text()
     expect(stream).toContain('猫だね。')
+    expect(stream).toContain('It\'s a cat.')
+    expect(stream).not.toContain('A cat.')
     expect(stream).toContain('[DONE]')
     expect(stream).not.toContain('Synthetic cat.')
     expect(stream).not.toContain('synthetic-secret')
-    expect(requests.map(request => request.model)).toEqual(['test-vision', 'test-brain'])
+    expect(requests.map(request => request.model)).toEqual(['test-vision', 'test-brain', 'test-brain'])
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('data:image')
     expect(JSON.stringify(requests[1]?.messages)).toContain('Custom character.')
+    expect(JSON.stringify(requests[2]?.messages)).not.toContain('Custom character.')
+    expect(JSON.stringify(requests[2]?.messages)).not.toContain('Synthetic cat.')
+  })
+
+  it('returns revised English with the unchanged Japanese through the brain HTTP route', async () => {
+    const nativeFetch = globalThis.fetch
+    const requests: Array<{ messages: Array<{ role: string, content: string }> }> = []
+    const japanese = 'ねえ、もし私が消えたら、あなたはその残像をどうやって消すつもり？'
+    const english = 'If I vanished, how would you ever erase the trace I left behind?'
+    const profile: GatewayProfile = { private: false, baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'a'.repeat(32)}/ai/v1/`, model: 'test-brain', apiKey: 'synthetic-secret' }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, options) => {
+      if (String(input).startsWith('https://api.cloudflare.com/')) {
+        const body = JSON.parse(String(options?.body))
+        requests.push(body)
+        const content = requests.length === 1
+          ? { action: 'speak', text: japanese, translation: 'Hey, if I disappeared, how would you go about getting rid of that afterimage?' }
+          : { translation: english }
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }))
+      }
+      return nativeFetch(input, options)
+    })
+    const gateway = await listen(createGateway({ brain: profile }, token, undefined, 'ja-en', true, false, { brain: profile }))
+    const response = await fetch(`${gateway}/brain/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Synthetic idle question.' }] }),
+    })
+    expect(response.status).toBe(200)
+    const completion = await response.json()
+    expect(completion.choices[0].message.content).toBe(`${japanese}\n\n(${english})`)
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.messages[1]?.content).toBe(JSON.stringify({ japanese }))
+    expect(JSON.stringify(requests[1]?.messages)).not.toContain('Synthetic idle question.')
+    expect(requests[0]?.messages[0]?.content).not.toContain(japanese)
   })
 
   it('does not send disabled vision or cloud tools to the brain', async () => {

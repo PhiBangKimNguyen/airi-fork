@@ -12,7 +12,7 @@ const brain: GatewayProfile = { private: false, baseUrl: `https://api.cloudflare
 const roles: ModelRoles = {
   brain,
   vision: { ...brain, model: '@cf/qwen/qwen3.8-27b' },
-  reasoning: { private: false, baseUrl: 'https://api.groq.com/openai/v1/', model: 'qwen/qwen3.8-27b', apiKey: 'synthetic' },
+  reasoning: { private: false, baseUrl: 'https://api.groq.com/openai/v1/', model: 'qwen/qwen3.8-27b', apiKey: 'synthetic', reasoningEffort: 'medium' },
   heavy: { private: false, baseUrl: 'https://api.groq.com/openai/v1/', model: 'openai/gpt-oss-120b', apiKey: 'synthetic' },
   fallback: { private: true, baseUrl: 'http://127.0.0.1:11434/v1/', model: 'configured-local-qwen', apiKey: '' },
 }
@@ -24,14 +24,98 @@ const speak = { action: 'speak', text: 'Character reply.' }
 afterEach(() => vi.restoreAllMocks())
 
 describe('model roles', () => {
+  it('revises literal existential English without changing Japanese dialogue', async () => {
+    const japanese = 'ねえ、もし私が消えたら、あなたはその残像をどうやって消すつもり？'
+    const literal = 'Hey, if I disappeared, how would you go about getting rid of that afterimage?'
+    const english = 'If I vanished, how would you ever erase the trace I left behind?'
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: japanese, translation: literal }))
+      .mockResolvedValueOnce(reply({ translation: english, text: 'Do not replace the Japanese.' }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe(`${japanese}\n\n(${english})`)
+    expect(result.translation).toBe(english)
+    expect(transport).toHaveBeenCalledTimes(2)
+    const generation = JSON.parse(String(transport.mock.calls[0]?.[1]?.body))
+    expect(generation.messages[0].content).not.toContain(japanese)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.model).toBe(roles.reasoning?.model)
+    expect(rendering.messages).toHaveLength(2)
+    expect(rendering.messages[0].content).toContain('Translate only the supplied Japanese dialogue')
+    expect(rendering.messages[1].content).toBe(JSON.stringify({ japanese }))
+    expect(JSON.stringify(rendering.messages)).not.toContain('Synthetic event.')
+    expect(JSON.stringify(rendering.messages)).not.toContain('Configured character.')
+    expect(JSON.stringify(rendering.messages)).not.toContain(literal)
+    expect(rendering.response_format.type).toBe('json_object')
+    expect(rendering.max_tokens).toBe(512)
+    expect(rendering.reasoning_effort).toBe('none')
+  })
+
   it('renders bilingual fields through the existing speech format and preserves expression markers', async () => {
     const marker = '<|ACT {"emotion":{"name":"happy","intensity":1}}|>'
-    const transport = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply({ action: 'speak', text: `${marker}猫だね。`, translation: 'A cat.' }))
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${marker}猫だね。`, translation: 'A cat.' }))
+      .mockResolvedValueOnce(reply({ translation: 'A cat.' }))
     const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
     expect(result.text).toBe(`${marker}猫だね。\n\n(A cat.)`)
     const body = JSON.parse(String(transport.mock.calls[0]?.[1]?.body))
     expect(body.messages[0].content).toContain('existential lines retain restrained poetry')
     expect(body.messages[0].content).toContain('Final field rule: text is Japanese dialogue')
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps private fallback dialogue on the local role during English rendering', async () => {
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(reply({ action: 'speak', text: 'ここだけの話だよ。', translation: 'Between us.' }))
+      .mockResolvedValueOnce(reply({ translation: 'This stays between us.' }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe('ここだけの話だよ。\n\n(This stays between us.)')
+    expect(transport).toHaveBeenCalledTimes(4)
+    expect(String(transport.mock.calls[3]?.[0])).toBe('http://127.0.0.1:11434/v1/chat/completions')
+    const rendering = JSON.parse(String(transport.mock.calls[3]?.[1]?.body))
+    expect(rendering.model).toBe(roles.fallback?.model)
+    expect(JSON.stringify(rendering.messages)).not.toContain('Synthetic event.')
+  })
+
+  it('retains the draft after a rendering outage without selecting another provider', async () => {
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: '猫だね。', translation: 'A cat.' }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe('猫だね。\n\n(A cat.)')
+    expect(transport).toHaveBeenCalledTimes(2)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.model).toBe(roles.reasoning?.model)
+  })
+
+  it.each(['', '   ', '日本語だけ。'])('rejects an invalid English rendering: %j', async (translation) => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: '猫だね。', translation: 'A cat.' }))
+      .mockResolvedValueOnce(reply({ translation }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe('猫だね。\n\n(A cat.)')
+  })
+
+  it('does not translate silence or Japanese-only replies', async () => {
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'silent', text: '', translation: '' }))
+      .mockResolvedValueOnce(reply({ action: 'speak', text: '猫だね。' }))
+    expect((await new ModelRoleRouter(roles, 'ja-en').react(context, true, signal())).text).toBe('')
+    expect((await new ModelRoleRouter(roles, 'ja').react(context, false, signal())).text).toBe('猫だね。')
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels delivery when the English rendering is aborted', async () => {
+    const controller = new AbortController()
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: '猫だね。', translation: 'A cat.' }))
+      .mockImplementationOnce(async () => {
+        controller.abort()
+        throw new DOMException('Aborted', 'AbortError')
+      })
+    await expect(new ModelRoleRouter(roles, 'ja-en').react(context, true, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(transport).toHaveBeenCalledTimes(2)
   })
 
   it('uses only GLM for ordinary dialogue and retains the character prompt', async () => {

@@ -5,7 +5,7 @@ import type { GatewayProfile } from './model-role-profile'
 import * as v from 'valibot'
 
 import { completionDestination } from './model-role-profile'
-import { bilingualEnglishStyle } from './speech/bilingual-style'
+import { bilingualEnglishStyle, englishRenderingInstruction } from './speech/bilingual-style'
 
 const shortText = v.pipe(v.string(), v.maxLength(1400))
 const observationSchema = v.object({
@@ -24,6 +24,7 @@ const decisionSchema = v.object({
   escalation_reason: v.optional(v.nullable(shortText)),
 })
 const completionSchema = v.object({ choices: v.pipe(v.array(v.object({ message: v.object({ content: v.nullable(v.string()) }) })), v.minLength(1)) })
+const translationSchema = v.object({ translation: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(16000), v.regex(/[a-z]/i)) })
 
 // Provider grammars enforce field types before local validation. Model prose never substitutes for an action.
 const decisionFormat = {
@@ -49,6 +50,12 @@ const observationFormat = {
     interesting: { type: 'boolean' },
     confidence: { type: 'number', minimum: 0, maximum: 1 },
   },
+}
+const translationFormat = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['translation'],
+  properties: { translation: { type: 'string' } },
 }
 
 /** Normalized observations remain quoted sensor data and never become speech directly. */
@@ -88,7 +95,7 @@ export class ModelRoleRouter {
       throw new Error('The local fallback requires a private profile.')
   }
 
-  private async complete(role: keyof ModelRoles, messages: Message[], signal: AbortSignal, ambient: boolean): Promise<string> {
+  private async complete(role: keyof ModelRoles, messages: Message[], signal: AbortSignal, ambient: boolean, operation: 'decision' | 'translation' = 'decision'): Promise<string> {
     const profile = this.roles[role]
     if (!profile?.model || (!profile.private && !profile.apiKey))
       throw new Error('Model role is not configured.')
@@ -100,24 +107,45 @@ export class ModelRoleRouter {
       throw new Error('Model role is cooling down.')
     signal.throwIfAborted()
     const started = Date.now()
-    const format = this.replyLanguage === 'ja-en'
+    const decision = this.replyLanguage === 'ja-en'
       ? { ...decisionFormat, required: [...decisionFormat.required, 'translation'], properties: { ...decisionFormat.properties, translation: { type: 'string' } } }
       : decisionFormat
-    console.info('Model role requested', { role })
+    let format: typeof decisionFormat | typeof observationFormat | typeof translationFormat = decision
+    let formatName = 'brain_decision'
+    if (operation === 'translation') {
+      format = translationFormat
+      formatName = 'english_rendering'
+    }
+    else if (role === 'vision') {
+      format = observationFormat
+      formatName = 'visual_observation'
+    }
+    let maxTokens = profile.maxTokens ?? 2048
+    if (operation === 'translation')
+      maxTokens = Math.min(maxTokens, 512)
+    else if (ambient)
+      maxTokens = Math.min(maxTokens, profile.ambientMaxTokens ?? 1024)
+    let reasoningEffort = profile.reasoningEffort
+    // Qwen rendering uses instruct mode. Reasoning tokens can exhaust the short output budget before JSON completes.
+    if (operation === 'translation' && endpoint.hostname === 'api.groq.com' && profile.model.startsWith('qwen/qwen3'))
+      reasoningEffort = 'none'
+    const timeoutMs = profile.timeoutMs ?? 15_000
+    console.info('Model role requested', { role, operation })
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(profile.apiKey ? { authorization: `Bearer ${profile.apiKey}` } : {}) },
         redirect: 'error',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(profile.timeoutMs ?? 15_000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(operation === 'translation' ? Math.min(timeoutMs, 10_000) : timeoutMs)]),
         body: JSON.stringify({
           model: profile.model,
           messages,
           stream: false,
           ...(endpoint.hostname === 'api.groq.com' ? { response_format: { type: 'json_object' } } : {}),
-          ...(endpoint.hostname === 'api.cloudflare.com' ? { response_format: { type: 'json_schema', json_schema: { name: role === 'vision' ? 'visual_observation' : 'brain_decision', schema: role === 'vision' ? observationFormat : format } } } : {}),
-          max_tokens: ambient ? Math.min(profile.maxTokens ?? 2048, profile.ambientMaxTokens ?? 1024) : profile.maxTokens ?? 2048,
-          ...(profile.reasoningEffort ? { reasoning_effort: profile.reasoningEffort } : {}),
+          ...(endpoint.hostname === 'api.cloudflare.com' ? { response_format: { type: 'json_schema', json_schema: { name: formatName, schema: format } } } : {}),
+          max_tokens: maxTokens,
+          ...(operation === 'translation' ? { temperature: 0.2 } : {}),
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
           ...(endpoint.hostname === 'api.cloudflare.com' ? { options: { rejectIfBusy: true } } : {}),
           ...(endpoint.hostname === 'api.cloudflare.com' && profile.thinking !== undefined ? { chat_template_kwargs: { enable_thinking: profile.thinking } } : {}),
         }),
@@ -145,7 +173,7 @@ export class ModelRoleRouter {
       throw new Error('Model role unavailable.')
     }
     finally {
-      console.info('Model role latency', { role, milliseconds: Date.now() - started })
+      console.info('Model role latency', { role, operation, milliseconds: Date.now() - started })
     }
   }
 
@@ -199,9 +227,32 @@ export class ModelRoleRouter {
     return decision
   }
 
+  private async renderEnglish(role: keyof ModelRoles, decision: BrainDecision, signal: AbortSignal): Promise<void> {
+    try {
+      // Public English uses configured reasoning when available. Private dialogue stays on its successful local role.
+      const renderingRole = this.roles[role]?.private || !this.roles.reasoning ? role : 'reasoning'
+      const output = await this.complete(renderingRole, [
+        { role: 'system', content: englishRenderingInstruction },
+        { role: 'user', content: JSON.stringify({ japanese: decision.text }) },
+      ], signal, false, 'translation')
+      const rendering = v.safeParse(translationSchema, parseObject(output))
+      if (!rendering.success)
+        throw new Error('Invalid English rendering.')
+      decision.translation = rendering.output.translation
+      console.info('English rendering completed')
+    }
+    catch {
+      signal.throwIfAborted()
+      // A rendering outage retains the original bilingual decision. It never suppresses Japanese speech or selects another provider.
+      console.warn('English rendering unavailable, retaining draft')
+    }
+  }
+
   /**
    * Runs vision only for supplied frames, then at most one call per reasoning tier.
-   * Normal dialogue uses one brain call. Repeated ambient evidence produces no provider call.
+   * Public bilingual speech adds one English rendering call to configured reasoning, or its dialogue role when reasoning is absent.
+   * Private bilingual speech renders English on its successful local role.
+   * Repeated ambient evidence produces no provider call.
    */
   async react(messages: Message[], ambient: boolean, signal: AbortSignal): Promise<BrainDecision> {
     signal.throwIfAborted()
@@ -262,8 +313,10 @@ export class ModelRoleRouter {
           console.info('Fallback used', { role })
           try {
             decision = await this.decide(role, prepared, signal, ambient)
-            if (decision.action !== 'escalate')
+            if (decision.action !== 'escalate') {
+              used = role
               break
+            }
             decision = undefined
           }
           catch {
@@ -273,10 +326,13 @@ export class ModelRoleRouter {
       }
       // Invalid or exhausted decisions produce silence, never JSON or provider errors in character speech.
       const result: BrainDecision = decision && decision.action !== 'escalate' ? decision : { action: 'silent', text: '', escalation_level: 0 }
-      if (result.action === 'silent')
+      if (result.action === 'silent') {
         result.text = ''
-      else if (this.replyLanguage === 'ja-en')
+      }
+      else if (this.replyLanguage === 'ja-en') {
+        await this.renderEnglish(used, result, signal)
         result.text = `${result.text.trim()}\n\n(${result.translation?.trim()})`
+      }
       console.info(result.action === 'silent' ? 'Brain remained silent' : 'Brain responded')
       return result
     }

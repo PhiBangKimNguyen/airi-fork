@@ -61,6 +61,27 @@ Existential dialogue retains its poetic image and emotional tone.
 Figurative 残像 becomes a lingering trace, memory, or presence.
 The policy changes English rendering without rewriting Japanese dialogue.
 
+The first policy-only update still delivered literal English after restart.
+Its complete Japanese example also appeared in a reported idle line.
+Generation prompts now omit that complete example.
+
+For bilingual brain speech, `ModelRoleRouter` renders English in a separate call after dialogue generation.
+Only the completed Japanese dialogue enters this request.
+History, sensor observations, character instructions, and the draft English remain excluded.
+Public replies use the configured reasoning role for English rendering.
+If reasoning is absent, the successful dialogue role performs rendering.
+Private replies remain on their successful local role, including a local fallback.
+The rendering response can replace only the English field.
+Japanese dialogue and speech markers remain unchanged.
+
+Each accepted bilingual brain reply adds one rendering call, capped at 512 completion tokens and ten seconds.
+Groq Qwen rendering disables thinking, so the short completion budget remains available for English JSON.
+This uses the supported instruct mode in [Groq's API contract](https://console.groq.com/docs/api-reference).
+Silence and Japanese-only replies require no rendering call.
+Cancellation prevents delivery.
+If rendering fails or returns invalid English, the original bilingual draft remains available without another provider call.
+Other direct gateway providers continue to use the shared prompt policy.
+
 ## Limits
 
 Lexical matching does not provide general semantic equivalence.
