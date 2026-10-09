@@ -24,6 +24,44 @@ const speak = { action: 'speak', text: 'Character reply.' }
 afterEach(() => vi.restoreAllMocks())
 
 describe('model roles', () => {
+  it('replaces an embedded draft caption instead of appending a second translation', async () => {
+    const japanese = 'あー、やっぱり、この曲は雰囲気作りがすごいね。'
+    const draft = 'Ah, this song really excels at setting the mood.'
+    const revised = 'Ah, this song really knows how to set the mood.'
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n\n(${draft})`, translation: draft }))
+      .mockResolvedValueOnce(reply({ translation: `(${revised})` }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe(`${japanese}\n\n(${revised})`)
+    expect(result.translation).toBe(revised)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.messages[1].content).toBe(JSON.stringify({ japanese }))
+  })
+
+  it('removes multiple embedded captions and retains one normalized draft during rendering failure', async () => {
+    const japanese = '[prosody tone=plain focus=]この曲、好きだな。'
+    const english = 'I like this song (especially the piano).'
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n\n(${english})\n\n（I love this song.）`, translation: `((${english}))` }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe(`${japanese}\n\n(${english})`)
+    expect(result.translation).toBe(english)
+  })
+
+  it('preserves Japanese notes, inline technical parentheses and expression markers', async () => {
+    const marker = '<|ACT {"emotion":{"name":"happy","intensity":1}}|>'
+    const japanese = `${marker}YouTube (Music)で聴いてる。\n（ちょっと照れるね）`
+    const english = 'Listening on YouTube (Music).'
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n\n(Draft English.)`, translation: 'Draft English.' }))
+      .mockResolvedValueOnce(reply({ translation: `（${english}）` }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe(`${japanese}\n\n(${english})`)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.messages[1].content).toBe(JSON.stringify({ japanese }))
+  })
+
   it('revises literal existential English without changing Japanese dialogue', async () => {
     const japanese = 'ねえ、もし私が消えたら、あなたはその残像をどうやって消すつもり？'
     const literal = 'Hey, if I disappeared, how would you go about getting rid of that afterimage?'

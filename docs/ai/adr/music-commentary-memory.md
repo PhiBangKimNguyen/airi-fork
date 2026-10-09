@@ -74,6 +74,13 @@ Private replies remain on their successful local role, including a local fallbac
 The rendering response can replace only the English field.
 Japanese dialogue and speech markers remain unchanged.
 
+The model can still append draft English inside the Japanese field despite its schema instructions.
+Before rendering, the router removes standalone trailing English parenthetical blocks from that field.
+Japanese notes, inline technical parentheses, expression markers, and prosody tags remain intact.
+The caption assembler alone adds the English wrapper.
+Both draft and rendered English lose redundant outer wrappers before assembly.
+Rendering failure therefore also displays one English caption.
+
 Each accepted bilingual brain reply adds one rendering call, capped at 512 completion tokens and ten seconds.
 Groq Qwen rendering disables thinking, so the short completion budget remains available for English JSON.
 This uses the supported instruct mode in [Groq's API contract](https://console.groq.com/docs/api-reference).

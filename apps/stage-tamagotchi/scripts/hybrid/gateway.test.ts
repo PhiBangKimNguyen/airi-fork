@@ -35,7 +35,7 @@ describe('hybrid gateway', () => {
         const body = JSON.parse(String(options?.body))
         requests.push(body)
         const rendering = body.response_format?.json_schema?.name === 'english_rendering'
-        let decision: unknown = { action: 'speak', text: '猫だね。', translation: 'A cat.' }
+        let decision: unknown = { action: 'speak', text: '猫だね。\n\n(A cat.)', translation: 'A cat.' }
         if (body.model === 'test-vision')
           decision = { summary: 'Synthetic cat.', interesting: true }
         else if (rendering)
@@ -80,8 +80,8 @@ describe('hybrid gateway', () => {
         const body = JSON.parse(String(options?.body))
         requests.push(body)
         const content = requests.length === 1
-          ? { action: 'speak', text: japanese, translation: 'Hey, if I disappeared, how would you go about getting rid of that afterimage?' }
-          : { translation: english }
+          ? { action: 'speak', text: `${japanese}\n\n(Hey, if I disappeared, how would you go about getting rid of that afterimage?)`, translation: 'Hey, if I disappeared, how would you go about getting rid of that afterimage?' }
+          : { translation: `(${english})` }
         return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }))
       }
       return nativeFetch(input, options)

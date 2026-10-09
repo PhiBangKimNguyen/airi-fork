@@ -75,6 +75,60 @@ function parseObject(text: string): unknown {
   return JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
 }
 
+function finalParentheticalStart(text: string): number {
+  if (!/[)）]$/.test(text))
+    return -1
+  const openings: string[] = []
+  for (let index = text.length - 1; index >= 0; index--) {
+    const char = text[index]
+    if (char === ')' || char === '）') {
+      openings.push(char === ')' ? '(' : '（')
+    }
+    else if (char === '(' || char === '（') {
+      if (openings.pop() !== char)
+        return -1
+      if (!openings.length)
+        return index
+    }
+  }
+  return -1
+}
+
+/**
+ * Removes standalone trailing English captions while retaining Japanese notes and inline technical text.
+ * @example
+ * dialogueOnly('猫だね。\n\n(A cat.)')
+ * // => '猫だね。'
+ */
+function dialogueOnly(text: string): string {
+  let dialogue = text.trim()
+  // Models can embed a caption despite the separate field contract. Remove only standalone trailing English groups.
+  while (dialogue) {
+    const start = finalParentheticalStart(dialogue)
+    if (start < 0 || !/(?:^|\n)[ \t]*$/.test(dialogue.slice(0, start)))
+      break
+    const content = dialogue.slice(start + 1, -1)
+    if (!/\p{Script=Latin}/u.test(content) || /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(content))
+      break
+    dialogue = dialogue.slice(0, start).trimEnd()
+  }
+  return dialogue
+}
+
+/**
+ * Removes complete outer caption wrappers without changing inner parentheses.
+ * @example
+ * unwrappedTranslation('(A song (live).)')
+ * // => 'A song (live).'
+ */
+function unwrappedTranslation(text: string): string {
+  let translation = text.trim()
+  // The caption assembler owns the outer parentheses. Nested parentheses inside English remain unchanged.
+  while (translation && finalParentheticalStart(translation) === 0)
+    translation = translation.slice(1, -1).trim()
+  return translation
+}
+
 /**
  * Owns provider cooldowns and transient visual evidence for one gateway lifetime.
  * Ambient duplicates remain silent. Cancellation prevents escalation and fallback calls.
@@ -220,9 +274,11 @@ export class ModelRoleRouter {
     const decision = result.output
     if (decision.action === 'escalate' && (!decision.escalation_level || !decision.escalation_reason?.trim()))
       throw new Error('Escalation requires a level and reason.')
-    if (this.replyLanguage === 'ja-en' && decision.action === 'speak'
-      && (!decision.translation?.trim() || decision.text.trimStart().startsWith('('))) {
-      throw new Error('Bilingual replies require dialogue and a separate translation.')
+    if (this.replyLanguage === 'ja-en' && decision.action === 'speak') {
+      decision.text = dialogueOnly(decision.text)
+      decision.translation = unwrappedTranslation(decision.translation ?? '')
+      if (!decision.translation || !decision.text || decision.text.startsWith('('))
+        throw new Error('Bilingual replies require dialogue and a separate translation.')
     }
     return decision
   }
@@ -235,7 +291,10 @@ export class ModelRoleRouter {
         { role: 'system', content: englishRenderingInstruction },
         { role: 'user', content: JSON.stringify({ japanese: decision.text }) },
       ], signal, false, 'translation')
-      const rendering = v.safeParse(translationSchema, parseObject(output))
+      const parsed = v.safeParse(translationSchema, parseObject(output))
+      if (!parsed.success)
+        throw new Error('Invalid English rendering.')
+      const rendering = v.safeParse(translationSchema, { translation: unwrappedTranslation(parsed.output.translation) })
       if (!rendering.success)
         throw new Error('Invalid English rendering.')
       decision.translation = rendering.output.translation
