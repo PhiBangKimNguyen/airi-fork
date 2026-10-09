@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { IOTraceRecordingState } from '@proj-airi/stage-shared/types/io-trace'
 
+import VueDevtools from '@proj-airi/stage-ui/components/scenarios/settings/vue-devtools'
+
 import { useElectronEventaContext, useElectronEventaInvoke } from '@proj-airi/electron-vueuse'
 import { ButtonBar, CheckBar, IconItem } from '@proj-airi/stage-ui/components'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
@@ -148,6 +150,7 @@ const openEditor = useElectronEventaInvoke(electronOpenEditor)
 </script>
 
 <template>
+  <VueDevtools />
   <ButtonBar
     v-model="settings.disableTransitions"
     :class="['mb-2', 'transition-all duration-250 ease-in-out']"

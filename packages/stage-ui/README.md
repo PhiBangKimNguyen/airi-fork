@@ -14,6 +14,12 @@ Replies appear immediately. Readings follow a short pause in streaming updates. 
 The `FuriganaDictionary` Vite plugin serves development assets and bundles all dictionary files and redistribution notices for offline builds.
 Register it in each renderer host. `MarkdownRenderer` enables reading aids through its `furigana` prop. `FuriganaText` accepts plain caption text.
 
+## Vue DevTools in settings
+
+The web and Electron developer settings pages host the Vue DevTools launcher during development.
+The launcher stays hidden on the character stage. Its inspection panel retains the plugin controls.
+`VueDevtools` moves the plugin root into settings and returns it to the hidden body location when settings close.
+
 ## Collected music memory
 
 `MediaWatchMemory` stores explicitly shared YouTube playback in the local profile, with a limit of 200 videos.

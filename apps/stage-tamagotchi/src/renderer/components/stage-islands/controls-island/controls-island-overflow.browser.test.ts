@@ -11,6 +11,7 @@ import { useSpeechStore } from '@proj-airi/stage-ui/stores/modules/speech'
 import { useVisionStore } from '@proj-airi/stage-ui/stores/modules/vision/store'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
 import { useSettingsStageModel } from '@proj-airi/stage-ui/stores/settings/stage-model'
+import { useSpeechOutputControlStore } from '@proj-airi/stage-ui/stores/speech-output-control'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-vue'
@@ -134,6 +135,40 @@ beforeEach(() => {
 })
 
 describe('controls Island overflow', () => {
+  it('keeps hearing, mute, and connection controls inside the expanded menu', async () => {
+    await page.viewport(450, 600)
+    const { i18n, screen } = mountControlsIsland('bottom-right')
+    const output = useSpeechOutputControlStore()
+    output.setSpeechMuted(false)
+    const label = (key: string) => i18n.global.t(`tamagotchi.stage.controls-island.${key}`)
+    const hearing = screen.getByLabelText(label('open-hearing-controls'), { exact: true })
+    const mute = screen.getByLabelText(label('mute'), { exact: true })
+    const connectionLabel = `${i18n.global.t('stage.websocket-status.disconnected')}. ${i18n.global.t('stage.websocket-status.open-settings')}`
+    const connection = screen.getByLabelText(connectionLabel, { exact: true })
+    const main = screen.getByTestId('main-controls').element()
+    const menu = screen.getByTestId('controls-menu').element()
+
+    for (const control of [hearing, mute, connection]) {
+      expect(main.contains(control.element())).toBe(false)
+      expect(menu.contains(control.element())).toBe(true)
+      await expect.element(control).not.toBeVisible()
+    }
+
+    await screen.getByLabelText(label('expand'), { exact: true }).click()
+    for (const control of [hearing, mute, connection])
+      await expect.element(control).toBeVisible()
+
+    await mute.click()
+    await expect.element(screen.getByLabelText(label('unmute'), { exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await screen.getByLabelText(label('unmute'), { exact: true }).click()
+    await connection.click()
+    expect(openSettings).toHaveBeenCalledWith({ route: '/settings/connection' })
+
+    await screen.getByLabelText(label('collapse'), { exact: true }).click()
+    for (const control of [hearing, mute, connection])
+      await expect.element(control).not.toBeVisible()
+  })
+
   for (const dock of docks) {
     for (const size of sizes) {
       // ROOT CAUSE:
@@ -349,9 +384,13 @@ describe('controls Island overflow', () => {
   //
   // We fixed this by aligning the outer viewport to the dock edge after layout changes.
   it('issue #2400 aligns bottom docks to the visible vertical scroll end', async () => {
-    await page.viewport(450, 200)
+    await page.viewport(450, 600)
     const { i18n, screen } = mountControlsIsland('bottom-right')
     const label = (key: string) => i18n.global.t(`tamagotchi.stage.controls-island.${key}`)
+    const main = screen.getByTestId('main-controls').element() as HTMLElement
+    await expect.poll(() => main.offsetHeight).toBeGreaterThan(0)
+    const overflowHeight = Math.ceil(main.getBoundingClientRect().height) + 15
+    await page.viewport(450, overflowHeight)
 
     await screen.getByLabelText(label('expand'), { exact: true }).click()
     const island = screen.getByTestId('controls-island').element() as HTMLElement
@@ -361,7 +400,7 @@ describe('controls Island overflow', () => {
     const collapse = screen.getByLabelText(label('collapse'), { exact: true }).element() as HTMLElement
     expect(collapse.getBoundingClientRect().top).toBeGreaterThanOrEqual(8)
     collapse.blur()
-    await page.viewport(450, 190)
+    await page.viewport(450, overflowHeight - 10)
     await expect.poll(() => viewport.scrollTop).toBe(viewport.scrollHeight - viewport.clientHeight)
   })
 
@@ -538,7 +577,7 @@ for (const dock of docks) {
     const main = screen.getByTestId('main-controls').element() as HTMLElement
     const menu = screen.getByTestId('controls-menu').element() as HTMLElement
     const toggle = main.querySelector<HTMLButtonElement>('[aria-controls]')!
-    const icon = toggle.querySelector<HTMLElement>('[i-solar\\:alt-arrow-up-line-duotone]')!
+    const icon = toggle.querySelector<HTMLElement>('.i-solar\\:alt-arrow-up-line-duotone')!
     const isTop = dock.startsWith('top')
     const isLeft = dock.endsWith('left')
     await expect.poll(() => island.offsetHeight === main.offsetHeight).toBe(true)

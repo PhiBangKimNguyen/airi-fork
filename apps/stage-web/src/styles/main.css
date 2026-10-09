@@ -2,6 +2,11 @@
 @import './transitions.css';
 @import './vue-transitions.css';
 
+/* The settings developer page hosts the Vue DevTools launcher. */
+body > #__vue-devtools-container__ {
+  display: none !important;
+}
+
 :root {
   --bg-color-light: rgb(255 255 255);
   --bg-color-dark: rgb(18 18 18);

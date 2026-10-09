@@ -316,7 +316,37 @@ function resetMainWindowPosition() {
                   :icon-class="adjustStyleClasses.icon"
                 />
 
-                <div grid grid-cols-3 gap-2>
+                <div :class="['grid grid-cols-3 gap-2']">
+                  <ControlButtonTooltip disable-hoverable-content>
+                    <ControlsIslandHearingConfig :show="blockingOverlays.has('hearing')" @update:show="setOverlay('hearing', $event)">
+                      <div :class="['relative']">
+                        <ControlButton
+                          :button-style="adjustStyleClasses.button"
+                          :aria-label="t('tamagotchi.stage.controls-island.open-hearing-controls')"
+                        >
+                          <Transition name="fade" mode="out-in">
+                            <IndicatorMicVolume v-if="enabled" :class="adjustStyleClasses.icon" />
+                            <div v-else :class="[adjustStyleClasses.icon, 'i-ph:microphone-slash', 'text-neutral-800 dark:text-neutral-300']" />
+                          </Transition>
+                        </ControlButton>
+                      </div>
+                    </ControlsIslandHearingConfig>
+                    <template #tooltip>
+                      {{ t('tamagotchi.stage.controls-island.open-hearing-controls') }}
+                    </template>
+                  </ControlButtonTooltip>
+
+                  <ControlsIslandSpeechMute
+                    :button-style="adjustStyleClasses.button"
+                    :icon-class="adjustStyleClasses.icon"
+                  />
+
+                  <StatusIsland
+                    v-if="IS_DEV"
+                    :button-style="adjustStyleClasses.button"
+                    :icon-class="adjustStyleClasses.icon"
+                  />
+
                   <ControlButtonTooltip disable-hoverable-content>
                     <ControlButton
                       v-track-button="{ name: 'controls_island_action', action: 'toggle_settings' }"
@@ -324,7 +354,7 @@ function resetMainWindowPosition() {
                       :aria-label="t('tamagotchi.stage.controls-island.open-settings')"
                       @click="openSettings({ route: '/settings' })"
                     >
-                      <div i-solar:settings-minimalistic-outline :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+                      <div :class="[adjustStyleClasses.icon, 'i-solar:settings-minimalistic-outline', 'text-neutral-800 dark:text-neutral-300']" />
                     </ControlButton>
                     <template #tooltip>
                       {{ t('tamagotchi.stage.controls-island.open-settings') }}
@@ -345,7 +375,7 @@ function resetMainWindowPosition() {
                           :aria-label="t('tamagotchi.stage.controls-island.switch-profile')"
                           @click="toggle"
                         >
-                          <div i-solar:emoji-funny-square-broken :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+                          <div :class="[adjustStyleClasses.icon, 'i-solar:emoji-funny-square-broken', 'text-neutral-800 dark:text-neutral-300']" />
                         </ControlButton>
                       </template>
                     </ControlsIslandProfilePicker>
@@ -361,7 +391,7 @@ function resetMainWindowPosition() {
                       :aria-label="t('tamagotchi.stage.controls-island.refresh')"
                       @click="refreshWindow"
                     >
-                      <div i-solar:refresh-linear :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+                      <div :class="[adjustStyleClasses.icon, 'i-solar:refresh-linear', 'text-neutral-800 dark:text-neutral-300']" />
                     </ControlButton>
                     <template #tooltip>
                       {{ t('tamagotchi.stage.controls-island.refresh') }}
@@ -375,7 +405,7 @@ function resetMainWindowPosition() {
                       :aria-label="t('tamagotchi.stage.controls-island.center-main-window')"
                       @click="resetMainWindowPosition"
                     >
-                      <div i-solar:target-linear :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+                      <div :class="[adjustStyleClasses.icon, 'i-solar:target-linear', 'text-neutral-800 dark:text-neutral-300']" />
                     </ControlButton>
                     <template #tooltip>
                       {{ t('tamagotchi.stage.controls-island.center-main-window') }}
@@ -393,8 +423,8 @@ function resetMainWindowPosition() {
                       @click="() => toggleDark()"
                     >
                       <Transition name="fade" mode="out-in">
-                        <div v-if="isDark" i-solar:moon-outline :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
-                        <div v-else i-solar:sun-2-outline :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+                        <div v-if="isDark" :class="[adjustStyleClasses.icon, 'i-solar:moon-outline', 'text-neutral-800 dark:text-neutral-300']" />
+                        <div v-else :class="[adjustStyleClasses.icon, 'i-solar:sun-2-outline', 'text-neutral-800 dark:text-neutral-300']" />
                       </Transition>
                     </ControlButton>
                     <template #tooltip>
@@ -412,8 +442,8 @@ function resetMainWindowPosition() {
                       :aria-label="alwaysOnTop ? t('tamagotchi.stage.controls-island.unpin-from-top') : t('tamagotchi.stage.controls-island.pin-on-top')"
                       @click="toggleAlwaysOnTop"
                     >
-                      <div v-if="alwaysOnTop" i-solar:pin-bold :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
-                      <div v-else i-solar:pin-linear :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300 opacity-50" />
+                      <div v-if="alwaysOnTop" :class="[adjustStyleClasses.icon, 'i-solar:pin-bold', 'text-neutral-800 dark:text-neutral-300']" />
+                      <div v-else :class="[adjustStyleClasses.icon, 'i-solar:pin-linear', 'text-neutral-800 dark:text-neutral-300 opacity-50']" />
                     </ControlButton>
                     <template #tooltip>
                       {{ alwaysOnTop ? t('tamagotchi.stage.controls-island.unpin-from-top') : t('tamagotchi.stage.controls-island.pin-on-top') }}
@@ -427,11 +457,10 @@ function resetMainWindowPosition() {
                       v-track-button="{ name: 'controls_island_action', action: 'close_app' }"
                       :button-style="adjustStyleClasses.button"
                       :aria-label="t('tamagotchi.stage.controls-island.close')"
-                      hover:bg-red-500
-                      hover:text-white
+                      :class="['hover:bg-red-500 hover:text-white']"
                       @click="() => quitApp()"
                     >
-                      <div i-solar:close-circle-outline :class="adjustStyleClasses.icon" />
+                      <div :class="[adjustStyleClasses.icon, 'i-solar:close-circle-outline']" />
                     </ControlButton>
                     <template #tooltip>
                       {{ t('tamagotchi.stage.controls-island.close') }}
@@ -458,10 +487,8 @@ function resetMainWindowPosition() {
               @click="toggleControls"
             >
               <div
-                :class="adjustStyleClasses.icon"
+                :class="[adjustStyleClasses.icon, 'i-solar:alt-arrow-up-line-duotone scale-110', 'transition-all duration-300', 'text-neutral-800 dark:text-neutral-300']"
                 :style="{ transform: `rotate(${arrowRotation}deg)` }"
-                i-solar:alt-arrow-up-line-duotone scale-110 transition-all duration-300
-                text="neutral-800 dark:neutral-300"
               />
             </ControlButton>
             <template #tooltip>
@@ -469,38 +496,11 @@ function resetMainWindowPosition() {
             </template>
           </ControlButtonTooltip>
 
-          <StatusIsland
-            v-if="IS_DEV"
-            :button-style="adjustStyleClasses.button"
-            :icon-class="adjustStyleClasses.icon"
-          />
-
           <ControlsIslandChatButton :button-style="adjustStyleClasses.button" :icon-class="adjustStyleClasses.icon" />
 
           <ControlButtonTooltip side="inward">
-            <ControlsIslandHearingConfig :show="blockingOverlays.has('hearing')" @update:show="setOverlay('hearing', $event)">
-              <div class="relative">
-                <ControlButton :button-style="adjustStyleClasses.button">
-                  <Transition name="fade" mode="out-in">
-                    <IndicatorMicVolume v-if="enabled" :class="adjustStyleClasses.icon" />
-                    <div v-else i-ph:microphone-slash :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
-                  </Transition>
-                </ControlButton>
-              </div>
-            </ControlsIslandHearingConfig>
-            <template #tooltip>
-              {{ t('tamagotchi.stage.controls-island.open-hearing-controls') }}
-            </template>
-          </ControlButtonTooltip>
-
-          <ControlsIslandSpeechMute
-            :button-style="adjustStyleClasses.button"
-            :icon-class="adjustStyleClasses.icon"
-          />
-
-          <ControlButtonTooltip side="inward">
-            <ControlButton :button-style="adjustStyleClasses.button" cursor-move :class="{ 'drag-region': isLinux }" @mousedown="startDraggingWindow?.()">
-              <div i-ph:arrows-out-cardinal :class="adjustStyleClasses.icon" text="neutral-800 dark:neutral-300" />
+            <ControlButton :button-style="adjustStyleClasses.button" :class="['cursor-move', { 'drag-region': isLinux }]" @mousedown="startDraggingWindow?.()">
+              <div :class="[adjustStyleClasses.icon, 'i-ph:arrows-out-cardinal', 'text-neutral-800 dark:text-neutral-300']" />
             </ControlButton>
             <template #tooltip>
               {{ t('tamagotchi.stage.controls-island.drag-to-move-window') }}

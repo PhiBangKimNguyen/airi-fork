@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import VueDevtools from '@proj-airi/stage-ui/components/scenarios/settings/vue-devtools'
+
 import { CheckBar, IconItem } from '@proj-airi/stage-ui/components'
 import { useSettings } from '@proj-airi/stage-ui/stores/settings'
 import { computed } from 'vue'
@@ -120,6 +122,7 @@ const menu = computed(() => [
 </script>
 
 <template>
+  <VueDevtools />
   <CheckBar
     v-model="settings.disableTransitions"
     v-motion
