@@ -11,6 +11,8 @@ import Inspect from 'vite-plugin-inspect'
 
 import { defineConfig } from 'vite'
 
+import { FuriganaDictionary } from './src/plugins/furigana'
+
 // For Histoire
 export default defineConfig({
   resolve: {
@@ -41,6 +43,7 @@ export default defineConfig({
     ],
   },
   plugins: [
+    FuriganaDictionary(),
     // TODO: Type wrong for `unplugin-yaml` in Histoire required
     // Vite version, wait until Histoire updates to support Vite 7
     Yaml() as Plugin,

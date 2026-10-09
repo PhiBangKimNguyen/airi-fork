@@ -12,6 +12,7 @@ import Layouts from 'vite-plugin-vue-layouts'
 import VueMacros from 'vue-macros/vite'
 import VueRouter from 'vue-router/vite'
 
+import { FuriganaDictionary } from '@proj-airi/stage-ui/plugins/furigana'
 import { Download } from '@proj-airi/unplugin-fetch'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
 import { defineKirieConfig } from 'kirie'
@@ -103,6 +104,7 @@ export default defineKirieConfig({
       },
 
       plugins: [
+        FuriganaDictionary(),
         Info(),
 
         {

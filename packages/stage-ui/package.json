@@ -16,7 +16,9 @@
     "directory": "packages/stage-ui"
   },
   "exports": {
+    "./plugins/furigana": "./src/plugins/furigana.ts",
     ".": "./src/components/index.ts",
+    "./components/markdown": "./src/components/markdown/index.ts",
     "./components/scenarios/chat": "./src/components/scenarios/chat/index.ts",
     "./components/scenarios/media-watch-playlist": "./src/components/scenarios/media-watch-playlist.vue",
     "./components/scenarios/settings/model-settings": "./src/components/scenarios/settings/model-settings/index.ts",
@@ -150,6 +152,8 @@
     "idb-keyval": "catalog:",
     "jszip": "catalog:",
     "kokoro-js": "catalog:",
+    "kuroshiro": "catalog:",
+    "kuroshiro-analyzer-kuromoji": "catalog:",
     "localforage": "catalog:",
     "mediabunny": "catalog:",
     "nanoid": "catalog:",

@@ -843,6 +843,12 @@ catalogs:
     kokoro-js:
       specifier: ^1.2.1
       version: 1.2.1
+    kuroshiro:
+      specifier: 2.0.0-beta.2
+      version: 2.0.0-beta.2
+    kuroshiro-analyzer-kuromoji:
+      specifier: 2.0.0-beta.2
+      version: 2.0.0-beta.2
     kysely:
       specifier: 0.29.5
       version: 0.29.5
@@ -5213,6 +5219,12 @@ importers:
       kokoro-js:
         specifier: 'catalog:'
         version: 1.2.1
+      kuroshiro:
+        specifier: 'catalog:'
+        version: 2.0.0-beta.2
+      kuroshiro-analyzer-kuromoji:
+        specifier: 'catalog:'
+        version: 2.0.0-beta.2
       localforage:
         specifier: 'catalog:'
         version: 1.10.0
@@ -14902,6 +14914,9 @@ packages:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
+  doublearray@0.0.2:
+    resolution: {integrity: sha512-aw55FtZzT6AmiamEj2kvmR6BuFqvYgKZUkfQ7teqVRNqD5UE0rw8IeW/3gieHNKQ5sPuDKlljWEn4bzv5+1bHw==}
+
   draco3d@1.5.7:
     resolution: {integrity: sha512-m6WCKt/erDXcw+70IJXnG7M3awwQPAsZvJGX5zY7beBqpELw6RDGkYVU0W43AFxye4pDZ5i2Lbyc/NNGqwjUVQ==}
 
@@ -16896,6 +16911,17 @@ packages:
 
   kolorist@1.8.0:
     resolution: {integrity: sha512-Y+60/zizpJ3HRH8DCss+q95yr6145JXZo46OTpFvDZWLfRCE4qChOyk1b26nMaNpfHHgxagk9dXT5OP0Tfe+dQ==}
+
+  kuromoji@0.1.2:
+    resolution: {integrity: sha512-V0dUf+C2LpcPEXhoHLMAop/bOht16Dyr+mDiIE39yX3vqau7p80De/koFqpiTcL1zzdZlc3xuHZ8u5gjYRfFaQ==}
+
+  kuroshiro-analyzer-kuromoji@2.0.0-beta.2:
+    resolution: {integrity: sha512-l+tWOLJPR3jUyivw18EssfMHTJ/t2tj/yeV1qn/SVsS8fBLFOjtbAB+liX/JTbA4PLhNnTNUPjadn/XjEaMLOw==}
+    engines: {node: '>=22'}
+
+  kuroshiro@2.0.0-beta.2:
+    resolution: {integrity: sha512-vNACorCcVmmNPpdIjzYP3fXdLkvE16q0W4hRduPCW5oev3lngob4+Mw/XhyUgIgnTUa/+HqbCnrDkzN2MV+Jyg==}
+    engines: {node: '>=22'}
 
   kysely@0.28.17:
     resolution: {integrity: sha512-nbD8lB9EB3wNdMhOCdx5Li8DxnLbvKByylRLcJ1h+4SkrowVeECAyZlyiKMThF7xFdRz0jSQ2MoJr+wXux2y0Q==}
@@ -20935,6 +20961,9 @@ packages:
 
   yuku-parser@0.8.7:
     resolution: {integrity: sha512-vRD9nwt4L3aYpxNqeSC4WqLv58xrXef0Ong1Mc45CTXTIpvLafx7JO05sczmQZwdLEZvywrLOGdNC5+Rp5N1BQ==}
+
+  zlibjs@0.3.1:
+    resolution: {integrity: sha512-+J9RrgTKOmlxFSDHo0pI1xM6BLVUv+o0ZT9ANtCxGkjIVCCUdx9alUF8Gm+dGLKbkkkidWIHFDZHDMpfITt4+w==}
 
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
@@ -29721,6 +29750,8 @@ snapshots:
 
   dotenv@17.4.2: {}
 
+  doublearray@0.0.2: {}
+
   draco3d@1.5.7: {}
 
   driver.js@1.8.0: {}
@@ -32077,6 +32108,18 @@ snapshots:
       phonemizer: 1.2.1
 
   kolorist@1.8.0: {}
+
+  kuromoji@0.1.2:
+    dependencies:
+      async: 2.6.4
+      doublearray: 0.0.2
+      zlibjs: 0.3.1
+
+  kuroshiro-analyzer-kuromoji@2.0.0-beta.2:
+    dependencies:
+      kuromoji: 0.1.2
+
+  kuroshiro@2.0.0-beta.2: {}
 
   kysely@0.28.17: {}
 
@@ -36964,6 +37007,8 @@ snapshots:
       '@yuku-parser/binding-linux-x64-musl': 0.8.7
       '@yuku-parser/binding-win32-arm64': 0.8.7
       '@yuku-parser/binding-win32-x64': 0.8.7
+
+  zlibjs@0.3.1: {}
 
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:

@@ -14,6 +14,7 @@ import VueMacros from 'vue-macros/vite'
 import VueRouter from 'vue-router/vite'
 
 import { paraformerBilingualZhEn, xAsrBilingualZhEnInt8, zipformerMultilingual } from '@proj-airi/provider-inference/sherpaw-transcription/models'
+import { FuriganaDictionary } from '@proj-airi/stage-ui/plugins/furigana'
 import { Download } from '@proj-airi/unplugin-fetch'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
 import { Sherpaw } from '@proj-airi/vite-plugin-sherpaw'
@@ -193,6 +194,7 @@ export default defineConfig({
     },
 
     plugins: [
+      FuriganaDictionary(),
       Info(),
 
       {

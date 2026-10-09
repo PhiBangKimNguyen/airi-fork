@@ -2,6 +2,18 @@
 
 Shared core for stage
 
+## Japanese reading aids
+
+Assistant chat replies and desktop captions show hiragana above known kanji through native ruby annotations.
+User messages, code blocks, inline code, mathematical formulas, and existing ruby annotations stay unchanged.
+The original reply remains in message storage, copy actions, model context, and speech requests. Speech never receives display readings.
+Kuroshiro and Kuromoji generate readings locally. No additional model request or external reading service runs.
+The dictionary loads lazily when kanji first appear. Unknown words retain their original text without an invented reading.
+Dictionary readings can differ from the intended pronunciation of names or ambiguous words.
+Replies appear immediately. Readings follow a short pause in streaming updates. A dictionary failure retains the original display.
+The `FuriganaDictionary` Vite plugin serves development assets and bundles all dictionary files and redistribution notices for offline builds.
+Register it in each renderer host. `MarkdownRenderer` enables reading aids through its `furigana` prop. `FuriganaText` accepts plain caption text.
+
 ## Collected music memory
 
 `MediaWatchMemory` stores explicitly shared YouTube playback in the local profile, with a limit of 200 videos.

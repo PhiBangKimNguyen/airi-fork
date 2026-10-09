@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FuriganaText } from '@proj-airi/stage-ui/components/markdown'
 import { useSpeakingStore } from '@proj-airi/stage-ui/stores/audio'
 import { useCharacterStore } from '@proj-airi/stage-ui/stores/character'
 import { useTimeoutFn } from '@vueuse/core'
@@ -43,6 +44,6 @@ watch([text, () => character.reactions.at(-1)?.id, nowSpeaking], ([caption, id, 
       'bg-white/90 text-neutral-900 dark:bg-neutral-950/90 dark:text-neutral-100 backdrop-blur-md',
     ]"
   >
-    {{ text }}
+    <FuriganaText :text="text" />
   </div>
 </template>

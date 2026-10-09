@@ -4,6 +4,7 @@ import type { CaptionChannelEvent } from '@proj-airi/stage-shared'
 import { defineInvoke } from '@moeru/eventa'
 import { useElectronEventaContext, useElectronMouseAroundWindowBorder, useElectronMouseInWindow } from '@proj-airi/electron-vueuse'
 import { createFadeAnimator, PoppinText } from '@proj-airi/stage-ui/components'
+import { FuriganaText } from '@proj-airi/stage-ui/components/markdown'
 import { refDebounced, useBroadcastChannel } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
@@ -117,10 +118,16 @@ onUnmounted(() => {
           ]"
           :style="type === 'caption-assistant' ? { paintOrder: 'stroke fill' } : undefined"
         >
+          <FuriganaText
+            v-if="type === 'caption-assistant'"
+            :text="captionTextByType[type].map(segment => segment.text).join('')"
+            :class="['color-neutral-50! align-middle']"
+          />
           <PoppinText
+            v-else
             :text="captionTextByType[type]"
             :animator="captionAnimatorByType[type]"
-            :text-class="type === 'caption-assistant' ? 'color-neutral-50! align-middle' : type === 'caption-speaker' ? 'color-neutral-50! align-middle' : ''"
+            text-class="color-neutral-50! align-middle"
           />
         </div>
       </div>
