@@ -132,6 +132,8 @@ export const useChatSessionStore = defineStore('chat-session', () => {
   ].join('\n')}\n`
 
   function getCurrentUserId() {
+    if (import.meta.env.VITE_AIRI_HYBRID_ENABLED === 'true')
+      return 'local'
     return userId.value || 'local'
   }
 

@@ -24,7 +24,7 @@ onMounted(() => popup.init())
         <div :class="['flex-1', 'text-xs', 'leading-snug', 'opacity-80']">
           {{ popup.lastError.value }}
         </div>
-        <Button variant="danger" size="sm" @click="popup.clearLastError">
+        <Button variant="secondary" color="red" size="sm" @click="popup.clearLastError">
           Clear
         </Button>
       </div>
@@ -36,6 +36,11 @@ onMounted(() => popup.init())
       v-model:send-subtitles="popup.form.sendSubtitles"
       v-model:send-spark-notify="popup.form.sendSparkNotify"
       v-model:enable-vision="popup.form.enableVision"
+      v-model:cloud-video-vision="popup.form.cloudVideoVision"
+      v-model:cloud-video-provider="popup.form.cloudVideoProvider"
+      v-model:audio-ears="popup.form.audioEars"
+      v-model:inkling-research-media="popup.form.inklingResearchMedia"
+      v-model:follow-youtube-videos="popup.form.followYouTubeVideos"
       @capture="popup.captureFrame"
     />
 

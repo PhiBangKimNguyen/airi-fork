@@ -18,6 +18,7 @@ import { handleHotUpdate, routes } from 'vue-router/auto-routes'
 
 import App from './App.vue'
 
+import { initializeHybrid } from './modules/hybrid'
 import { i18n } from './modules/i18n'
 import { resolveRendererWindowContext } from './window-context'
 
@@ -47,6 +48,7 @@ configureAnalyticsAdapter(async (options) => {
 })
 registerAuthorizationHandler(browserAuthorizationHandler)
 
+initializeHybrid()
 const pinia = createPinia()
 const synced = setupSynced({
   leadership: resolveRendererWindowContext().leadership,

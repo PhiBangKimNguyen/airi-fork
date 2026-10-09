@@ -418,6 +418,33 @@ describe('client', () => {
     expect(client.isReady).toBe(true)
   })
 
+  it('sends protocol heartbeats during continuous business updates', async () => {
+    vi.useFakeTimers()
+    const connector = new FakeConnector()
+    const client = new Client({
+      autoConnect: false,
+      autoReconnect: false,
+      connector,
+      handshake: 'manual',
+      name: 'test-extension',
+      heartbeat: { pingInterval: 20_000, readTimeout: 60_000 },
+    })
+    const connected = client.connect()
+    const connection = connector.open()
+    await connected
+    for (let update = 0; update < 4; update++) {
+      await vi.advanceTimersByTimeAsync(5000)
+      connector.emit(serverEvent('input:text', { text: 'Synthetic update' }))
+    }
+    expect(connection.sent.filter(event => event.type === 'transport:connection:heartbeat')).toHaveLength(1)
+    expect(connection.sent.at(-1)).toMatchObject({ type: 'transport:connection:heartbeat', data: { kind: 'ping' } })
+    connector.emit(serverEvent('transport:connection:heartbeat', { kind: 'pong', message: 'pong' }))
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(connection.sent.filter(event => event.type === 'transport:connection:heartbeat')).toHaveLength(2)
+    expect(client.isReady).toBe(true)
+    client.close()
+  })
+
   it('races local timeouts without cancelling the shared connect task', async () => {
     vi.useFakeTimers()
 

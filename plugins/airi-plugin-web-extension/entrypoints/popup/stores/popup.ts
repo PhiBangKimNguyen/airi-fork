@@ -15,12 +15,17 @@ export const usePopupStore = createGlobalState(() => {
   const form = reactive<ExtensionSettings>({
     wsUrl: '',
     token: '',
-    enabled: true,
+    enabled: false,
     sendPageContext: true,
     sendVideoContext: true,
     sendSubtitles: true,
     sendSparkNotify: true,
     enableVision: false,
+    cloudVideoVision: false,
+    cloudVideoProvider: 'gemini',
+    audioEars: false,
+    inklingResearchMedia: false,
+    followYouTubeVideos: true,
   })
 
   const connected = computed(() => status.value?.connected ?? false)

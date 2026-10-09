@@ -776,7 +776,8 @@ function createClientWithConnector<TMessage>(
       heartbeatTimeoutTask?.cancel()
       heartbeatTimeoutTask = undefined
     }
-    else if (heartbeatTimeoutTask) {
+    else {
+      // Strict heartbeat cadence stays independent of business traffic, including before the first ping.
       return
     }
 

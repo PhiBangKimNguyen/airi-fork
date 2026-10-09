@@ -1,0 +1,14 @@
+{
+  "reviewed_on": "2026-10-07",
+  "hosted_teacher_generation": false,
+  "gemini": {
+    "training_permission": "not-approved",
+    "source": "https://ai.google.dev/gemini-api/terms",
+    "reason": "The terms restrict competing-model development. Grounded results cannot train other models. Written permission is required before this pipeline accepts Gemini outputs."
+  },
+  "nvidia-kimi": {
+    "training_permission": "not-approved",
+    "source": "https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf",
+    "reason": "Sections 1.2 and 1.4 limit trial outputs to evaluation. Section 4.12 restricts competing products. Model weights and hosted API outputs have different terms."
+  }
+}

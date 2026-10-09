@@ -1,5 +1,5 @@
 import type { Matrix } from '@pixi/math'
-import type { Bounds } from 'pixi-live2d-display/cubism4'
+import type { Bounds } from 'pixi-live2d-display'
 
 /** A point in the model's own canvas space, before any stage transform. */
 interface Live2DModelCanvasPoint {

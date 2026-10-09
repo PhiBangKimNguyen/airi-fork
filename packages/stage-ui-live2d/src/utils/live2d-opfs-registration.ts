@@ -1,5 +1,4 @@
-import { Live2DFactory, ZipLoader } from 'pixi-live2d-display/cubism4'
-
+import { Live2DFactory, ZipLoader } from './live2d-runtime'
 import { OPFSCache } from './opfs-loader'
 
 const zipLoaderIndex = Live2DFactory.live2DModelMiddlewares.indexOf(ZipLoader.factory)

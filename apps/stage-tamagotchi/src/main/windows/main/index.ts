@@ -89,6 +89,8 @@ export async function setupMainWindow(params: {
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), '../preload/index.mjs'),
       sandbox: false,
+      // Co-watching heartbeats and reactions must keep running while Chrome covers the companion window.
+      backgroundThrottling: env.AIRI_HYBRID_ENABLED !== 'true',
     },
     // Thanks to [@HeartArmy](https://github.com/HeartArmy) for the tip implementation.
     //

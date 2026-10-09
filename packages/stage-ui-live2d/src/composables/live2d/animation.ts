@@ -1,4 +1,4 @@
-import type { InternalModel } from 'pixi-live2d-display/cubism4'
+import type { InternalModel } from 'pixi-live2d-display'
 
 import { MathUtils } from 'three'
 

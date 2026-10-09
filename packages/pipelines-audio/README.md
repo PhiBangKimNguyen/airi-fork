@@ -79,6 +79,14 @@ A group does not mix clips or schedule lanes against each other.
 Playback knows no chat session, turn, or agent notification contract.
 `Response` in core-agent supplies those conversation boundaries and producer ordering.
 
+## Speech segmentation
+
+`createSpeechPipeline` passes `segmenterOptions` to its default or custom segmenter for each intent.
+Use `{ sentenceMode: 'japanese' }` to synthesize complete Japanese sentences.
+This mode retains commas, elongated vowels, and hesitation marks, and ignores boost and word limits.
+Sentence punctuation, line breaks, explicit flush tokens, and special tokens still end segments.
+Default segmentation remains available when `sentenceMode` is absent.
+
 ## Checks
 
 Run `pnpm -F @proj-airi/pipelines-audio typecheck` and `pnpm -F @proj-airi/pipelines-audio test:run`.

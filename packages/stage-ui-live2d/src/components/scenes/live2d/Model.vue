@@ -7,9 +7,11 @@ import type {
   NormalizedRectangle,
   ScreenAmbientLightMode,
 } from '@proj-airi/stage-shared/screen-ambient-light'
+import type { Cubism4InternalModel } from 'pixi-live2d-display'
 
 import type { PixiLive2DInternalModel } from '../../../composables/live2d'
 
+import { errorMessageFrom } from '@moeru/std'
 import { listenBeatSyncBeatSignal } from '@proj-airi/stage-shared/beat-sync'
 import { ambientLightDefaults, ambientLightNeutralEnvironment, ambientLightPerceptualLevel, wholeWindowRectangle } from '@proj-airi/stage-shared/screen-ambient-light'
 import { useTheme } from '@proj-airi/ui'
@@ -19,7 +21,6 @@ import { formatHex } from 'culori'
 import { Mutex } from 'es-toolkit'
 import { storeToRefs } from 'pinia'
 import { DropShadowFilter } from 'pixi-filters'
-import { Live2DFactory, Live2DModel, MotionPriority } from 'pixi-live2d-display/cubism4'
 import { computed, onMounted, onUnmounted, ref, shallowRef, toRef, watch } from 'vue'
 
 import {
@@ -44,6 +45,10 @@ import { useFitModel } from '../../../composables/live2d/fit-model'
 import { Emotion, EmotionNeutralMotionName } from '../../../constants/emotions'
 import { ScreenAmbientLightFilter } from '../../../filters/screen-ambient-light'
 import { getLive2DMotionControlModelOffset, useL2dViewControl, useLive2DMotionControl, useLive2dParams } from '../../../stores'
+import { Cubism2Controller, setLive2DParameter } from '../../../utils/cubism2-controller'
+import { Cubism2InternalModel, Live2DFactory, Live2DModel, MotionPriority } from '../../../utils/live2d-runtime'
+import { measureModelBottom } from '../../../utils/model-bottom'
+import { ModelInteraction } from '../../../utils/model-interaction'
 
 const props = withDefaults(defineProps<{
   modelSrc?: string
@@ -129,9 +134,10 @@ const offset = computed(() => ({
 const pixiApp = toRef(() => props.app)
 const paused = toRef(() => props.paused)
 const focusAt = toRef(() => props.focusAt)
-const model = shallowRef<Live2DModel<PixiLive2DInternalModel>>()
+const model = shallowRef<Live2DModel<Cubism2InternalModel | Cubism4InternalModel>>()
 const initialModelWidth = ref<number>(0)
 const initialModelHeight = ref<number>(0)
+const initialModelBottom = ref(1)
 const mouthOpenSize = computed(() => Math.max(0, Math.min(100, props.mouthOpenSize)))
 const nowSpeaking = toRef(() => props.nowSpeaking)
 const lastUpdateTime = ref(0)
@@ -174,6 +180,7 @@ let resizeAnimation: ReturnType<typeof animate> | undefined
 const modelNormalizeParams = useFitModel(
   () => ({ width: props.width, height: props.height }),
   () => ({ width: initialModelWidth.value, height: initialModelHeight.value }),
+  initialModelBottom,
 )
 
 watch([offset, scale, modelNormalizeParams], () => {
@@ -247,7 +254,7 @@ const screenAmbientLightSquint = toRef(() => props.screenAmbientLightSquint)
 // Chooses which drawables stand in for the head once per model, so it is reset
 // whenever the model is replaced.
 const headTracker = createLive2DHeadTracker()
-const internalModelRef = shallowRef<PixiLive2DInternalModel>()
+const internalModelRef = shallowRef<Cubism4InternalModel>()
 const expressionController = useExpressionController({
   internalModel: internalModelRef,
 })
@@ -255,8 +262,10 @@ const expressionController = useExpressionController({
 // commits, so expression initialization cannot observe a newer prop by mistake.
 let loadedModelId: string | undefined
 // Saved SDK manager references for runtime expression toggle (restore on disable)
-const savedEyeBlink = shallowRef<any>(null)
-const savedExpressionManager = shallowRef<any>(null)
+const savedEyeBlink = shallowRef<Cubism4InternalModel['eyeBlink']>()
+let cubism2Controller: Cubism2Controller | undefined
+let modelInteraction: ModelInteraction | undefined
+const savedExpressionManager = shallowRef<Cubism4InternalModel['motionManager']['expressionManager']>()
 
 const localCurrentMotion = ref<{ group: string, index: number }>({ group: 'Idle', index: 0 })
 const beatSync = createBeatSyncController({
@@ -286,6 +295,8 @@ async function loadModel() {
 }
 
 async function performModelLoad() {
+  modelInteraction?.dispose()
+  modelInteraction = undefined
   modelLoading.value = true
   componentState.value = 'loading'
 
@@ -304,6 +315,8 @@ async function performModelLoad() {
 
   // REVIEW: here as await until(...) guarded the pixiApp and stage to be valid.
   if (model.value && pixiApp.value?.stage) {
+    cubism2Controller?.dispose()
+    cubism2Controller = undefined
     // Dispose expression controller before destroying the old model
     expressionController.dispose()
     internalModelRef.value = undefined
@@ -337,8 +350,10 @@ async function performModelLoad() {
       return
     }
 
-    const live2DModel = new Live2DModel<PixiLive2DInternalModel>()
+    const live2DModel = new Live2DModel<Cubism2InternalModel | Cubism4InternalModel>()
     await Live2DFactory.setupLive2DModel(live2DModel, { url: pendingModel.src, id: pendingModel.id }, { autoInteract: false })
+    // Queue an update before the first draw, even when the shared ticker has not run.
+    live2DModel.update(1)
     availableMotions.value.forEach((motion) => {
       if (motion.motionName in Emotion) {
         motionMap.value[motion.fileName] = motion.motionName
@@ -355,27 +370,70 @@ async function performModelLoad() {
     pixiApp.value!.stage.addChild(model.value)
     initialModelWidth.value = model.value.width
     initialModelHeight.value = model.value.height
+    initialModelBottom.value = 1
     model.value.anchor.set(0.5, 0.5)
+    const initialFit = modelNormalizeParams.value
+    model.value.scale.set(initialFit.scale)
+    model.value.position.set(initialFit.x, initialFit.y)
+    initialModelBottom.value = measureModelBottom(pixiApp.value!, model.value)
     setScaleAndPosition()
 
     // --- Interaction
 
-    model.value.on('hit', (hitAreas) => {
-      if (model.value && hitAreas.includes('body'))
-        model.value.motion('tap_body')
-    })
+    modelInteraction = new ModelInteraction(model.value, pixiApp.value!, () => props.paused || modelLoading.value)
 
     // --- Motion
 
     const internalModel = model.value.internalModel
-    const coreModel = internalModel.coreModel
+    // Apply all stored parameters to the model
+    setLive2DParameter(internalModel, 'ParamAngleX', modelParameters.value.angleX)
+    setLive2DParameter(internalModel, 'ParamAngleY', modelParameters.value.angleY)
+    setLive2DParameter(internalModel, 'ParamAngleZ', modelParameters.value.angleZ)
+    setLive2DParameter(internalModel, 'ParamEyeLOpen', modelParameters.value.leftEyeOpen)
+    setLive2DParameter(internalModel, 'ParamEyeROpen', modelParameters.value.rightEyeOpen)
+    setLive2DParameter(internalModel, 'ParamEyeSmile', modelParameters.value.leftEyeSmile)
+    setLive2DParameter(internalModel, 'ParamBrowLX', modelParameters.value.leftEyebrowLR)
+    setLive2DParameter(internalModel, 'ParamBrowRX', modelParameters.value.rightEyebrowLR)
+    setLive2DParameter(internalModel, 'ParamBrowLY', modelParameters.value.leftEyebrowY)
+    setLive2DParameter(internalModel, 'ParamBrowRY', modelParameters.value.rightEyebrowY)
+    setLive2DParameter(internalModel, 'ParamBrowLAngle', modelParameters.value.leftEyebrowAngle)
+    setLive2DParameter(internalModel, 'ParamBrowRAngle', modelParameters.value.rightEyebrowAngle)
+    setLive2DParameter(internalModel, 'ParamBrowLForm', modelParameters.value.leftEyebrowForm)
+    setLive2DParameter(internalModel, 'ParamBrowRForm', modelParameters.value.rightEyebrowForm)
+    setLive2DParameter(internalModel, 'ParamMouthOpenY', modelParameters.value.mouthOpen)
+    setLive2DParameter(internalModel, 'ParamMouthForm', modelParameters.value.mouthForm)
+    setLive2DParameter(internalModel, 'ParamCheek', modelParameters.value.cheek)
+    setLive2DParameter(internalModel, 'ParamBodyAngleX', modelParameters.value.bodyAngleX)
+    setLive2DParameter(internalModel, 'ParamBodyAngleY', modelParameters.value.bodyAngleY)
+    setLive2DParameter(internalModel, 'ParamBodyAngleZ', modelParameters.value.bodyAngleZ)
+    setLive2DParameter(internalModel, 'ParamBreath', modelParameters.value.breath)
+
+    if (internalModel instanceof Cubism2InternalModel) {
+      availableMotions.value = Object.entries(internalModel.motionManager.definitions)
+        .flatMap(([motionName, definitions]) => definitions?.map((motion, motionIndex) => ({
+          motionName,
+          motionIndex,
+          fileName: motion.file,
+        })) ?? [])
+      cubism2Controller = new Cubism2Controller(internalModel, {
+        idleEnabled: () => live2dIdleAnimationEnabled.value,
+        blinkEnabled: () => live2dAutoBlinkEnabled.value,
+        forceBlink: () => live2dForceAutoBlinkEnabled.value,
+        expressionsEnabled: () => live2dExpressionEnabled.value,
+        speaking: () => nowSpeaking.value,
+        mouthOpen: () => mouthOpenSize.value,
+      })
+      loadedModelId = pendingModel.id
+      emits('modelLoaded')
+      return
+    }
+
     const motionManager = internalModel.motionManager
     disableLive2DSdkBreath(internalModel)
-    coreModel.setParameterValueById('ParamMouthOpenY', mouthOpenSize.value)
 
     availableMotions.value = Object
       .entries(motionManager.definitions)
-      .flatMap(([motionName, definition]) => (definition?.map((motion: any, index: number) => ({
+      .flatMap(([motionName, definition]) => (definition?.map((motion, index: number) => ({
         motionName,
         motionIndex: index,
         fileName: motion.File,
@@ -388,13 +446,13 @@ async function performModelLoad() {
 
     // Configure the selected motion to loop
     if (selectedMotionGroup !== null && selectedMotionIndex) {
-      const groupIndex = (motionManager.groups as Record<string, any>)[selectedMotionGroup]
+      const groupIndex = selectedMotionGroup
       if (groupIndex !== undefined && motionManager.motionGroups[groupIndex]) {
         const motionIndex = Number.parseInt(selectedMotionIndex)
         const motion = motionManager.motionGroups[groupIndex][motionIndex]
-        if (motion && motion._looper) {
+        if (motion) {
           // Force the motion to loop
-          motion._looper.loopDuration = 0 // 0 means infinite loop
+          motion.setIsLoop(true)
           console.info('Configured motion to loop infinitely:', selectedMotionGroup, motionIndex)
         }
       }
@@ -415,7 +473,7 @@ async function performModelLoad() {
     // FIXME: it cannot blink if loading a model only have idle motion
     if (motionManager.groups.idle) {
       motionManager.motionGroups[motionManager.groups.idle]?.forEach((motion) => {
-        motion._motionData.curves.forEach((curve: any) => {
+        motion?._motionData.curves.forEach((curve) => {
         // TODO: After emotion mapper, stage editor, eye related parameters should be take cared to be dynamical instead of hardcoding
           if (curve.id === 'ParamEyeBallX' || curve.id === 'ParamEyeBallY') {
             curve.id = `_${curve.id}`
@@ -477,7 +535,7 @@ async function performModelLoad() {
       const selectedMotionIndex = localStorage.getItem('selected-runtime-motion-index')
 
       if (selectedMotionGroup !== null && selectedMotionIndex && live2dIdleAnimationEnabled.value) {
-        // Restart the selected runtime motion immediately for seamless looping
+        // Restart the selected runtime motion on the next frame
         console.info('Motion finished, restarting runtime motion:', selectedMotionGroup, selectedMotionIndex)
         // Use requestAnimationFrame to restart on the next frame for smooth transition
         requestAnimationFrame(() => {
@@ -488,29 +546,6 @@ async function performModelLoad() {
         })
       }
     })
-
-    // Apply all stored parameters to the model
-    coreModel.setParameterValueById('ParamAngleX', modelParameters.value.angleX)
-    coreModel.setParameterValueById('ParamAngleY', modelParameters.value.angleY)
-    coreModel.setParameterValueById('ParamAngleZ', modelParameters.value.angleZ)
-    coreModel.setParameterValueById('ParamEyeLOpen', modelParameters.value.leftEyeOpen)
-    coreModel.setParameterValueById('ParamEyeROpen', modelParameters.value.rightEyeOpen)
-    coreModel.setParameterValueById('ParamEyeSmile', modelParameters.value.leftEyeSmile)
-    coreModel.setParameterValueById('ParamBrowLX', modelParameters.value.leftEyebrowLR)
-    coreModel.setParameterValueById('ParamBrowRX', modelParameters.value.rightEyebrowLR)
-    coreModel.setParameterValueById('ParamBrowLY', modelParameters.value.leftEyebrowY)
-    coreModel.setParameterValueById('ParamBrowRY', modelParameters.value.rightEyebrowY)
-    coreModel.setParameterValueById('ParamBrowLAngle', modelParameters.value.leftEyebrowAngle)
-    coreModel.setParameterValueById('ParamBrowRAngle', modelParameters.value.rightEyebrowAngle)
-    coreModel.setParameterValueById('ParamBrowLForm', modelParameters.value.leftEyebrowForm)
-    coreModel.setParameterValueById('ParamBrowRForm', modelParameters.value.rightEyebrowForm)
-    coreModel.setParameterValueById('ParamMouthOpenY', modelParameters.value.mouthOpen)
-    coreModel.setParameterValueById('ParamMouthForm', modelParameters.value.mouthForm)
-    coreModel.setParameterValueById('ParamCheek', modelParameters.value.cheek)
-    coreModel.setParameterValueById('ParamBodyAngleX', modelParameters.value.bodyAngleX)
-    coreModel.setParameterValueById('ParamBodyAngleY', modelParameters.value.bodyAngleY)
-    coreModel.setParameterValueById('ParamBodyAngleZ', modelParameters.value.bodyAngleZ)
-    coreModel.setParameterValueById('ParamBreath', modelParameters.value.breath)
 
     // Save SDK manager references so they can be restored if expression is
     // toggled off at runtime.
@@ -524,14 +559,14 @@ async function performModelLoad() {
       // replaces it. The SDK's manager runs after motionManager.update() and
       // would overwrite our final-plugin values every frame.
       if (motionManager.expressionManager) {
-        ;(motionManager as any).expressionManager = null
+        delete motionManager.expressionManager
       }
       // Disable SDK eyeBlink — it runs on frames where motionUpdated=false and
       // would conflict with expression eye parameter overrides. Our auto-blink
       // plugin (Force Auto Blink setting) provides the replacement for models
       // without idle-motion blink curves.
       if (internalModel.eyeBlink) {
-        ;(internalModel as any).eyeBlink = null
+        delete internalModel.eyeBlink
       }
 
       internalModelRef.value = internalModel
@@ -559,11 +594,11 @@ async function performModelLoad() {
  * This is intentionally fire-and-forget from loadModel so that a failure in
  * expression loading does not prevent the model itself from rendering.
  */
-async function initExpressionController(internalModel?: PixiLive2DInternalModel, modelId?: string) {
+async function initExpressionController(internalModel?: Cubism4InternalModel, modelId?: string) {
   // Dispose any previous state (handles model reloads)
   expressionController.dispose()
 
-  const settings = internalModel?.settings as any
+  const settings = internalModel?.settings
   if (!settings)
     return
 
@@ -586,20 +621,16 @@ async function initExpressionController(internalModel?: PixiLive2DInternalModel,
   await expressionController.initialise(modelId, expressionRefs, readExpFile)
 }
 
-async function setMotion(motionName: string, index?: number) {
-  // TODO: motion? Not every Live2D model has motion, we do need to help users to set motion
-  if (!model.value) {
-    console.warn('Cannot set motion: model not loaded')
-    return
-  }
-
-  console.info('Setting motion:', motionName, 'index:', index)
+/** Plays one motion on the current model. Paused or loading scenes ignore the request rather than replay it later. */
+async function setMotion(motionName: string, index?: number): Promise<boolean> {
+  if (!model.value || props.paused || modelLoading.value)
+    return false
   try {
-    await model.value.motion(motionName, index, MotionPriority.FORCE)
-    console.info('Motion started successfully:', motionName)
+    return await model.value.motion(motionName, index, MotionPriority.FORCE)
   }
   catch (error) {
-    console.error('Failed to start motion:', motionName, error)
+    console.warn('Failed to start motion:', motionName, errorMessageFrom(error))
+    return false
   }
 }
 
@@ -709,84 +740,84 @@ watch(paused, value => value ? pixiApp.value?.stop() : pixiApp.value?.start())
 watch(() => modelParameters.value.angleX, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamAngleX', value)
+    setLive2DParameter(internalModel, 'ParamAngleX', value)
   }
 })
 
 watch(() => modelParameters.value.angleY, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamAngleY', value)
+    setLive2DParameter(internalModel, 'ParamAngleY', value)
   }
 })
 
 watch(() => modelParameters.value.angleZ, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamAngleZ', value)
+    setLive2DParameter(internalModel, 'ParamAngleZ', value)
   }
 })
 
 watch(() => modelParameters.value.leftEyeOpen, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamEyeLOpen', value)
+    setLive2DParameter(internalModel, 'ParamEyeLOpen', value)
   }
 })
 
 watch(() => modelParameters.value.rightEyeOpen, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamEyeROpen', value)
+    setLive2DParameter(internalModel, 'ParamEyeROpen', value)
   }
 })
 
 watch(() => modelParameters.value.mouthOpen, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamMouthOpenY', value)
+    setLive2DParameter(internalModel, 'ParamMouthOpenY', value)
   }
 })
 
 watch(() => modelParameters.value.mouthForm, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamMouthForm', value)
+    setLive2DParameter(internalModel, 'ParamMouthForm', value)
   }
 })
 
 watch(() => modelParameters.value.cheek, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamCheek', value)
+    setLive2DParameter(internalModel, 'ParamCheek', value)
   }
 })
 
 watch(() => modelParameters.value.bodyAngleX, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBodyAngleX', value)
+    setLive2DParameter(internalModel, 'ParamBodyAngleX', value)
   }
 })
 
 watch(() => modelParameters.value.bodyAngleY, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBodyAngleY', value)
+    setLive2DParameter(internalModel, 'ParamBodyAngleY', value)
   }
 })
 
 watch(() => modelParameters.value.bodyAngleZ, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBodyAngleZ', value)
+    setLive2DParameter(internalModel, 'ParamBodyAngleZ', value)
   }
 })
 
 watch(() => modelParameters.value.breath, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBreath', value)
+    setLive2DParameter(internalModel, 'ParamBreath', value)
   }
 })
 
@@ -794,56 +825,56 @@ watch(() => modelParameters.value.breath, (value) => {
 watch(() => modelParameters.value.leftEyebrowLR, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowLX', value)
+    setLive2DParameter(internalModel, 'ParamBrowLX', value)
   }
 })
 
 watch(() => modelParameters.value.rightEyebrowLR, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowRX', value)
+    setLive2DParameter(internalModel, 'ParamBrowRX', value)
   }
 })
 
 watch(() => modelParameters.value.leftEyebrowY, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowLY', value)
+    setLive2DParameter(internalModel, 'ParamBrowLY', value)
   }
 })
 
 watch(() => modelParameters.value.rightEyebrowY, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowRY', value)
+    setLive2DParameter(internalModel, 'ParamBrowRY', value)
   }
 })
 
 watch(() => modelParameters.value.leftEyebrowAngle, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowLAngle', value)
+    setLive2DParameter(internalModel, 'ParamBrowLAngle', value)
   }
 })
 
 watch(() => modelParameters.value.rightEyebrowAngle, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowRAngle', value)
+    setLive2DParameter(internalModel, 'ParamBrowRAngle', value)
   }
 })
 
 watch(() => modelParameters.value.leftEyebrowForm, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowLForm', value)
+    setLive2DParameter(internalModel, 'ParamBrowLForm', value)
   }
 })
 
 watch(() => modelParameters.value.rightEyebrowForm, (value) => {
   if (model.value) {
     const internalModel = model.value.internalModel
-    internalModel.coreModel.setParameterValueById('ParamBrowRForm', value)
+    setLive2DParameter(internalModel, 'ParamBrowRForm', value)
   }
 })
 
@@ -862,13 +893,15 @@ watch(live2dExpressionEnabled, (enabled) => {
   if (!model.value)
     return
   const im = model.value.internalModel
+  if (im instanceof Cubism2InternalModel)
+    return
   const mm = im.motionManager
   if (enabled) {
     if (mm.expressionManager) {
-      (mm as any).expressionManager = null
+      delete mm.expressionManager
     }
     if (im.eyeBlink) {
-      (im as any).eyeBlink = null
+      delete im.eyeBlink
     }
 
     internalModelRef.value = im
@@ -904,6 +937,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   isUnmounted = true
+  modelInteraction?.dispose()
+  cubism2Controller?.dispose()
   resizeAnimation?.pause()
   disposeShouldUpdateView?.()
   expressionController.dispose()
@@ -945,7 +980,19 @@ function headAnchor() {
   // which is visible on the frame a resize or a fit lands on.
   current.transform.updateLocalTransform()
 
-  const headRect = headTracker.bounds(internalModel)
+  const headArea = internalModel instanceof Cubism2InternalModel
+    ? Object.values(internalModel.hitAreas).find(area => /head|face/i.test(area.name))
+    : undefined
+  const headRect = internalModel instanceof Cubism2InternalModel
+    ? headArea && internalModel.getDrawableBounds(headArea.index)
+    : headTracker.bounds({
+        hitAreas: internalModel.hitAreas,
+        coreModel: internalModel.coreModel,
+        getDrawableBounds: index => internalModel.getDrawableBounds(index),
+        physics: internalModel.physics && {
+          evaluate: (_core, dt) => internalModel.physics?.evaluate(internalModel.coreModel, dt),
+        },
+      })
   if (!headRect)
     return undefined
 

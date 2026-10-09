@@ -79,3 +79,10 @@ Reported search abilities do not select a native tool implementation.
 OpenAI reasoning controls use the exact model entry and effort levels from the pinned catalog.
 Unsupported effort values are omitted. In particular, models without a `none` effort keep their server default when reasoning is disabled.
 Generation validation uses the configured model before consulting the endpoint model list.
+
+## Local VOICEVOX voicing
+
+The optional `voiceSettings.prosody` field selects `original` or `j` on AIRI's local VOICEVOX server.
+The provider sends this selection as `airi_prosody` on `/audio_query`.
+The server caches the mode with each plan. The speaker and four synthesis controls remain independent.
+For a standard VOICEVOX engine, omit this field.

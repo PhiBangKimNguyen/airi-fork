@@ -71,6 +71,8 @@ export interface VoicevoxSpeakerStyle {
 export interface VoicevoxSynthesisParameters {
   intonation?: number
   pitch?: number
+  /** AIRI's local engine chooses native VOICEVOX or the J reel shaping per plan. */
+  prosody?: 'original' | 'j'
   speed?: number
   volume?: number
 }
@@ -128,7 +130,9 @@ export async function synthesizeSpeech(
   synthesis: { parameters?: VoicevoxSynthesisParameters, styleId: string, text: string },
   options?: VoicevoxEngineRequestOptions,
 ): Promise<ArrayBuffer> {
-  const query = { speaker: synthesis.styleId, text: synthesis.text }
+  const query: Record<string, string> = { speaker: synthesis.styleId, text: synthesis.text }
+  if (synthesis.parameters?.prosody)
+    query.airi_prosody = synthesis.parameters.prosody
   const audioQueryResponse = await request({ baseUrl, endpoint: 'audio_query', query }, options)
   const audioQuery = applyVoicevoxParameters(
     await decodeJson<VoicevoxAudioQuery>(audioQueryResponse, 'audio_query'),

@@ -29,6 +29,12 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+!.env.hybrid.example
+**/__pycache__/
+
+# Proprietary Live2D Cubism 2 core. Run scripts/fetch-cubism2-core.mjs to download and verify it.
+packages/stage-ui-live2d/src/assets/js/cubism2-core.js
+packages/stage-ui-live2d/src/assets/js/cubism2-core.js.partial
 
 # Audio binaries
 *.pcm

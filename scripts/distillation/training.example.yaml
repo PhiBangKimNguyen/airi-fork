@@ -1,0 +1,22 @@
+base_model: REPLACE_WITH_EXISTING_LOCAL_CHECKPOINT
+dataset: .local/distillation/datasets/v001/train.jsonl
+evaluation_dataset: .local/distillation/datasets/v001/evaluation.jsonl
+output_dir: .local/distillation/checkpoints/v001
+method: qlora-sft
+quantization: nf4
+compute_dtype: bfloat16
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+learning_rate: 0.0001
+epochs: 1
+max_sequence_length: 2048
+automatic_training: false
+automatic_promotion: false
+promotion_gates:
+  private_context_cloud_leaks: 0
+  personality_consistency: human-review-required
+  speak_or_remain_silent: compare-to-current-checkpoint
+  tool_selection: compare-to-current-checkpoint
+  screen_summaries: local-only-evaluation
+  latency_and_memory: no-unapproved-regression

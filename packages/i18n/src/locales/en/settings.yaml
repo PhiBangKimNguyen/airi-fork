@@ -1441,6 +1441,9 @@ pages:
         title: VOICEVOX
         fields:
           field:
+            j-reel:
+              label: Use J reel voicing
+              description: Turn on for J's expressive pitch and timing. Turn off for original VOICEVOX. Your speaker and sliders stay the same.
             intonation:
               description: Adjust how much the intonation of the reading varies
               label: Intonation

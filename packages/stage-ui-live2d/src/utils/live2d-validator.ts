@@ -9,7 +9,7 @@ export type Live2DValidationStatus = 'VALID' | 'WARNING' | 'INVALID'
 export type Live2DValidationIssueSeverity = 'error' | 'warning'
 
 /** The file type that AIRI uses as the model target. */
-export type Live2DModelType = 'model3' | 'moc3' | 'unknown'
+export type Live2DModelType = 'model2' | 'model3' | 'moc3' | 'unknown'
 
 /** A stable identifier for a validation rule that produced an issue. */
 export type Live2DValidationIssueCode
@@ -327,18 +327,28 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
     issues: [],
   }
 
-  const settingsPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.model3.json'))
+  const settingsPaths = archivePaths.filter((path) => {
+    const name = basename(path).toLowerCase()
+    return name === 'model.json' || name.endsWith('.model.json') || name.endsWith('.model3.json')
+  })
   const mocPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.moc3'))
   const texturePaths = archivePaths.filter(path => path.toLowerCase().endsWith('.png'))
   const expressionPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.exp3.json'))
-  const motionPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.motion3.json'))
+  const motionPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.motion3.json') || path.toLowerCase().endsWith('.mtn'))
   const displayInfoPaths = archivePaths.filter(path => path.toLowerCase().endsWith('.cdi3.json'))
 
   report.resources.textures.discovered = texturePaths.length
   report.resources.expressions.discovered = expressionPaths.length
   report.resources.motions.discovered = motionPaths.length
   report.resources.expressions.parsed = await countParsedJsonResources(zip, expressionPaths, 'expression', report)
-  report.resources.motions.parsed = await countParsedJsonResources(zip, motionPaths, 'motion', report)
+  report.resources.motions.parsed = await countParsedJsonResources(zip, motionPaths.filter(path => !path.toLowerCase().endsWith('.mtn')), 'motion', report)
+  for (const path of motionPaths.filter(path => path.toLowerCase().endsWith('.mtn'))) {
+    const text = await zip.file(path)!.async('text')
+    if (text.trimStart().startsWith('# Live2D Animator Motion Data'))
+      report.resources.motions.parsed += 1
+    else
+      addIssue(report, 'invalid-resource-json', 'warning', `The motion file "${path}" has no Live2D motion header.`, 'Export the motion again with the Live2D Cubism Editor.')
+  }
 
   let settings: Record<string, unknown> | undefined
   let references: Record<string, unknown> | undefined
@@ -346,7 +356,7 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
 
   if (settingsPaths.length > 0) {
     const entryPoint = settingsPaths[0]
-    report.model.type = 'model3'
+    report.model.type = entryPoint.toLowerCase().endsWith('.model3.json') ? 'model3' : 'model2'
     report.model.entryPoint = entryPoint
     settingsFileName = basename(entryPoint)
 
@@ -356,14 +366,28 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
         'multiple-settings-files',
         'warning',
         `The archive contains ${settingsPaths.length} model settings files. AIRI will use ${settingsFileName}.`,
-        'Keep one model3.json file in each archive, or import each model as a separate ZIP.',
+        'Keep one model settings file in each archive, or import each model as a separate ZIP.',
       )
     }
 
     try {
       settings = await readJsonObject(zip, entryPoint)
-      if (isRecord(settings.FileReferences))
+      if (report.model.type === 'model2') {
+        const expressions = Array.isArray(settings.expressions)
+          ? settings.expressions.filter(isRecord).map(expression => ({ Name: expression.name, File: expression.file }))
+          : undefined
+        const motions: Record<string, Array<{ File: unknown }>> = {}
+        if (isRecord(settings.motions)) {
+          for (const [group, definitions] of Object.entries(settings.motions)) {
+            if (Array.isArray(definitions))
+              motions[group] = definitions.filter(isRecord).map(motion => ({ File: motion.file }))
+          }
+        }
+        references = { Moc: settings.model, Textures: settings.textures, Expressions: expressions, Motions: motions, Physics: settings.physics, Pose: settings.pose }
+      }
+      else if (isRecord(settings.FileReferences)) {
         references = settings.FileReferences
+      }
     }
     catch {
       addIssue(
@@ -409,7 +433,7 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
         'missing-moc-reference',
         'error',
         `${settingsFileName} does not define a MOC file.`,
-        `Add FileReferences.Moc to ${settingsFileName}.`,
+        report.model.type === 'model2' ? `Add the model path to ${settingsFileName}.` : `Add FileReferences.Moc to ${settingsFileName}.`,
       )
     }
   }
@@ -420,18 +444,19 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
   if (mocPath) {
     const moc = await zip.file(mocPath)!.async('uint8array')
     const header = String.fromCharCode(...moc.slice(0, 4))
-    const version = moc[4] ?? 0
+    const isCubism2 = report.model.type === 'model2'
+    const version = moc[isCubism2 ? 3 : 4] ?? 0
     const sizeMb = moc.length / 1024 / 1024
 
     report.model.moc = { path: mocPath, version, size: moc.length }
 
-    if (header !== 'MOC3') {
+    if (isCubism2 ? header.slice(0, 3) !== 'moc' || moc.length < 4 : header !== 'MOC3') {
       addIssue(
         report,
         'invalid-moc-header',
         'error',
-        `The MOC file "${mocPath}" does not have a valid MOC3 header.`,
-        'Export the MOC3 file again with the Live2D Cubism Editor.',
+        `The MOC file "${mocPath}" does not have a valid ${isCubism2 ? 'Cubism 2' : 'MOC3'} header.`,
+        'Export the model file again with the Live2D Cubism Editor.',
       )
     }
     if (sizeMb > 100) {
@@ -460,6 +485,14 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
     const expressionReferences = readExpressionReferences(references.Expressions)
     const motionReferences = readMotionReferences(references.Motions)
 
+    if (report.model.type === 'model2') {
+      const paths = expressionReferences.map(reference => resolveArchivePath(entryPoint, reference))
+        .filter(path => archivePaths.includes(path) && !expressionPaths.includes(path))
+      expressionPaths.push(...new Set(paths))
+      report.resources.expressions.discovered = expressionPaths.length
+      report.resources.expressions.parsed += await countParsedJsonResources(zip, [...new Set(paths)], 'expression', report)
+    }
+
     report.resources.textures.referenced = textureReferences.length
     report.resources.expressions.referenced = expressionReferences.length
     report.resources.motions.referenced = motionReferences.length
@@ -470,7 +503,7 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
         'missing-reference',
         'error',
         `${settingsFileName} does not define any textures.`,
-        `Add at least one texture path to FileReferences.Textures in ${settingsFileName}.`,
+        `Add at least one texture path to ${report.model.type === 'model2' ? 'textures' : 'FileReferences.Textures'} in ${settingsFileName}.`,
       )
     }
 
@@ -531,7 +564,7 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
         'unreferenced-expressions',
         'warning',
         `${unreferencedExpressionCount} ${noun} not referenced by ${settingsFileName}.`,
-        `Add the files to FileReferences.Expressions in ${settingsFileName}, or remove the unused files.`,
+        `Add the files to ${report.model.type === 'model2' ? 'expressions' : 'FileReferences.Expressions'} in ${settingsFileName}, or remove the unused files.`,
       )
     }
     if (unreferencedMotionCount > 0) {
@@ -541,7 +574,7 @@ export async function validateLive2DZip(file: File | Blob): Promise<Live2DValida
         'unreferenced-motions',
         'warning',
         `${unreferencedMotionCount} ${noun} not referenced by ${settingsFileName}.`,
-        `Add the files to FileReferences.Motions in ${settingsFileName}, or remove the unused files.`,
+        `Add the files to ${report.model.type === 'model2' ? 'motions' : 'FileReferences.Motions'} in ${settingsFileName}, or remove the unused files.`,
       )
     }
 

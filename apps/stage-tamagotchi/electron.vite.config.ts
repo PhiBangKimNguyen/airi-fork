@@ -21,7 +21,10 @@ import { defineConfig } from 'electron-vite'
 
 const stageUIAssetsRoot = resolve(join(import.meta.dirname, '..', '..', 'packages', 'stage-ui', 'src', 'assets'))
 const sharedCacheDir = resolve(join(import.meta.dirname, '..', '..', '.cache'))
-const sherpawModels = [paraformerBilingualZhEn, zipformerMultilingual, xAsrBilingualZhEnInt8]
+// Hybrid mode downloads ASR models only when local hearing is explicitly enabled.
+const sherpawModels = env.AIRI_HYBRID_ENABLED === 'true' && env.AIRI_ENABLE_LOCAL_ASR !== 'true'
+  ? []
+  : [paraformerBilingualZhEn, zipformerMultilingual, xAsrBilingualZhEnInt8]
 
 export default defineConfig({
   main: {

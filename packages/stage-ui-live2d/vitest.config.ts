@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
@@ -13,7 +15,9 @@ export default defineConfig({
         },
       },
       {
+        publicDir: fileURLToPath(new URL('../../apps/stage-tamagotchi/src/renderer/public', import.meta.url)),
         test: {
+          setupFiles: ['../../apps/stage-tamagotchi/src/test/setup-live2d.browser.ts'],
           name: 'browser',
           include: ['src/**/*.browser.test.ts'],
           browser: {

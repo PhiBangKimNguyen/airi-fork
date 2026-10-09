@@ -1,10 +1,9 @@
-import type { JSONObject, ModelSettings } from 'pixi-live2d-display/cubism4'
+import type { JSONObject, ModelSettings } from 'pixi-live2d-display'
 
 import JSZip from 'jszip'
 
-import { Cubism4ModelSettings, FileLoader, Live2DFactory, ZipLoader } from 'pixi-live2d-display/cubism4'
-
 import { decodeZipFileName } from './decode-zip-filename'
+import { Cubism4ModelSettings, FileLoader, Live2DFactory, ZipLoader } from './live2d-runtime'
 
 // Legacy/VTube-Studio archives often store entry names without the UTF-8 flag in a legacy
 // codepage; decode them so non-ASCII names (e.g. `手姿势切换.exp3.json`) don't become
@@ -145,7 +144,7 @@ function createModelSettings(text: string, url: string): ModelSettings {
 export function isSettingsFile(file: string) {
   return !shouldIgnoreLive2DArchiveEntry(file)
     && !file.endsWith('items_pinned_to_model.json')
-    && (file.endsWith('.model3.json') || file.endsWith('.model.json'))
+    && (file.endsWith('.model3.json') || file.endsWith('.model.json') || basename(file) === 'model.json')
 }
 
 export function isMocFile(file: string) {

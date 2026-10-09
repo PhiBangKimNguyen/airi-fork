@@ -2,11 +2,12 @@ import type { ContextUpdate } from '@proj-airi/server-sdk'
 
 import type { ExtensionSettings, ExtensionStatus, PageContextPayload, SubtitlePayload, VideoContextPayload } from '../shared/types'
 
-import { Client, ContextUpdateStrategy } from '@proj-airi/server-sdk'
+import { Client, ContextUpdateStrategy, WebSocketEventSource } from '@proj-airi/server-sdk'
 import { nanoid } from 'nanoid'
 
 import packageJSON from '../../package.json'
 
+import { mediaMessages } from '../shared/constants'
 import { errorMessageFromValue } from '../utils/error-message'
 
 const PLUGIN_NAME = 'proj-airi:plugin-web-extension'
@@ -19,6 +20,16 @@ export interface ClientState {
   lastVideo?: VideoContextPayload
   lastSubtitle?: SubtitlePayload
   lastVisionFrameAt?: number
+  sharedTabId?: number
+  sharedUrl?: string
+  sharingId?: string
+  sharingSessionId?: string
+  cloudVideoVision?: boolean
+  cloudVideoProvider?: ExtensionSettings['cloudVideoProvider']
+  audioEars?: boolean
+  localVideoVision?: boolean
+  inklingResearchMedia?: boolean
+  audioCapturing?: boolean
 }
 
 export function createClientState(): ClientState {
@@ -30,8 +41,7 @@ export function createClientState(): ClientState {
 
 function createIdentity() {
   return {
-    kind: 'plugin',
-    plugin: {
+    extension: {
       id: PLUGIN_NAME,
       version: typeof packageJSON.version === 'string' ? packageJSON.version : undefined,
     },
@@ -51,16 +61,29 @@ export function toStatus(state: ClientState, settings: ExtensionSettings): Exten
     lastVideo: state.lastVideo,
     lastSubtitle: state.lastSubtitle,
     lastVisionFrameAt: state.lastVisionFrameAt,
+    sharedTabId: state.sharedTabId,
+    audioCapturing: state.audioCapturing,
   }
 }
 
 export async function ensureClient(state: ClientState, settings: ExtensionSettings) {
+  state.cloudVideoVision = settings.cloudVideoVision
+  state.cloudVideoProvider = settings.cloudVideoProvider
+  state.audioEars = settings.audioEars
+  state.localVideoVision = settings.enableVision
+  state.inklingResearchMedia = settings.inklingResearchMedia
   if (!settings.enabled) {
     disconnectClient(state)
     return
   }
 
   if (state.client) {
+    return
+  }
+
+  const destination = new URL(settings.wsUrl)
+  if (destination.protocol !== 'ws:' || !['127.0.0.1', '[::1]'].includes(destination.hostname)) {
+    state.lastError = mediaMessages.loopbackRequired
     return
   }
 
@@ -78,6 +101,17 @@ export async function ensureClient(state: ClientState, settings: ExtensionSettin
     },
     onClose: () => {
       state.connected = false
+    },
+    onReady: () => {
+      state.connected = true
+      state.lastError = undefined
+      if (state.sharingId) {
+        publishSharing(state)
+        if (state.lastPage)
+          handlePageContext(state, settings, state.lastPage)
+        if (state.lastVideo)
+          handleVideoContext(state, settings, state.lastVideo, { notify: false })
+      }
     },
   })
 
@@ -118,7 +152,18 @@ function sendContextUpdate(state: ClientState, update: Omit<ContextUpdate, 'id' 
   })
 }
 
-function sendSparkNotify(state: ClientState, data: { headline: string, note?: string, payload?: Record<string, unknown> }) {
+/** Revokes queued reactions before the channel closes. A new share owns a new reaction correlation key. */
+export function publishSharing(state: ClientState) {
+  sendContextUpdate(state, {
+    strategy: ContextUpdateStrategy.ReplaceSelf,
+    lane: 'web:sharing',
+    contextId: 'web:sharing',
+    text: state.sharingId ? 'A browser tab is shared locally.' : 'Browser sharing stopped.',
+    metadata: { source: 'web-extension', sharingId: state.sharingId ?? '', sharingSessionId: state.sharingSessionId ?? '', url: state.sharedUrl ?? '', cloudVideoVision: state.cloudVideoVision === true, cloudVideoProvider: state.cloudVideoProvider, audioEars: state.audioEars === true, localVideoVision: state.localVideoVision === true, inklingResearchMedia: state.inklingResearchMedia === true },
+  })
+}
+
+export function sendSparkNotify(state: ClientState, data: { headline: string, note?: string, payload?: Record<string, unknown> }) {
   if (!state.client || !state.connected)
     return
 
@@ -132,7 +177,7 @@ function sendSparkNotify(state: ClientState, data: { headline: string, note?: st
       headline: data.headline,
       note: data.note,
       payload: data.payload,
-      destinations: ['character'],
+      destinations: [WebSocketEventSource.StageTamagotchi],
     },
   })
 }
@@ -146,7 +191,8 @@ export function handlePageContext(state: ClientState, settings: ExtensionSetting
   sendContextUpdate(state, {
     strategy: ContextUpdateStrategy.ReplaceSelf,
     lane: 'web:page',
-    text: `User is browsing: ${payload.title} (${payload.url}).`,
+    contextId: 'web:page',
+    text: `User is browsing: ${payload.title} (${payload.url}).\n${payload.visibleText ?? ''}`,
     metadata: {
       source: 'web-extension',
       site: payload.site,
@@ -194,6 +240,7 @@ export function handleVideoContext(
   sendContextUpdate(state, {
     strategy: ContextUpdateStrategy.ReplaceSelf,
     lane: 'web:video',
+    contextId: 'web:video',
     text: [
       headline,
       payload.channel ? `Channel: ${payload.channel}.` : undefined,
@@ -228,6 +275,7 @@ export function handleSubtitle(state: ClientState, settings: ExtensionSettings, 
   sendContextUpdate(state, {
     strategy: ContextUpdateStrategy.ReplaceSelf,
     lane: 'web:subtitle',
+    contextId: 'web:subtitle',
     text: `Subtitle: ${payload.text}`,
     metadata: {
       source: 'web-extension',

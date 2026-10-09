@@ -1,15 +1,15 @@
 // packages/pipelines-audio/src/processors/tts-chunker.test.ts
 
-import type { TtsInputChunk } from './tts-chunker'
+import type { TtsInputChunk, TtsInputChunkOptions } from './tts-chunker'
 
 import { describe, expect, it } from 'vitest'
 
 import { chunkTtsInput, isProbablyAngleTag, processNarrative } from './tts-chunker'
 
-async function collectChunkText(input: string) {
+async function collectChunkText(input: string, options?: TtsInputChunkOptions) {
   const chunks: string[] = []
 
-  for await (const chunk of chunkTtsInput(input))
+  for await (const chunk of chunkTtsInput(input, options))
     chunks.push(chunk.text)
 
   return chunks
@@ -165,5 +165,22 @@ describe('tTS Chunker Logic Cleanup', () => {
 
       expect(chunks.join('')).toBe(input)
     })
+  })
+})
+
+describe('japanese sentence boundaries', () => {
+  const options = { sentenceMode: 'japanese' } as const
+
+  it('keeps comma-separated clauses together beyond the word limit', async () => {
+    const text = '急にジャズっぽくなって、ここから先は夜のラウンジみたいな雰囲気だけど、その切り替えはずるくない？'
+    expect(await collectChunkText(text, options)).toEqual([text])
+  })
+
+  it.each(['ずるくな～い？', 'ずるくな~い？', 'それは…ずるくない？'])('keeps elongated vowels and hesitation inside %s', async (text) => {
+    expect(await collectChunkText(text, options)).toEqual([text])
+  })
+
+  it('splits complete sentences and Windows line breaks', async () => {
+    expect(await collectChunkText('いいね。ずるくな～い？\r\nまた来てね！', options)).toEqual(['いいね。', 'ずるくな～い？', 'また来てね！'])
   })
 })

@@ -209,3 +209,26 @@ status:
   sign-in-unconfirmed: Could not confirm your session. Please sign in again.
   dismiss: Dismiss
   configure-hearing: Select and configure a Hearing provider in Settings.
+hybrid:
+  show-captions: Show transcription bubble
+  idle-musings: Let AIRI muse when I am idle and not sharing a tab
+  user-profile: About me
+  user-profile-card: My card
+  user-profile-local: Stays on this device. Qwen always reads it.
+  user-profile-cloud: Share my card with cloud models
+  user-profile-cloud-scope: Cloud chat and idle musings include your card when a cloud model is selected. Free Inkling and shared-video reactions never receive it.
+  media-continuity: Remember public video transitions during sharing
+  shared-title-chat: Give cloud chat the current shared video title
+  media-continuity-scope: Only the active public YouTube share supplies titles and recent reaction words. Stop sharing clears this context.
+  model-picker: Conversation model
+  last-route: 'Last: {model}'
+  private-always-local: Private context stays LOCAL. Only explicitly shared video can use cloud vision.
+  watch-memory: Local viewing memory
+  watch-memory-enabled: Remember shared YouTube videos
+  watch-memory-private: Full viewing history and remembered comments stay local. Qwen keeps all habit context local.
+  watch-habit-provider: Who teases you?
+  watch-habit-shared: Choosing Gemini or Kimi shares only replay, return, or channel engagement counts for an explicitly shared public video.
+  watch-time-aware: Tease my music choice with the time of day
+  watch-time-shared: Uses Indochina Time (UTC+7) and fresh audio from the shared public video. Only the broad time period reaches the model.
+  watch-memory-days: 'seen on {count} days'
+  watch-memory-forget: Forget viewing history

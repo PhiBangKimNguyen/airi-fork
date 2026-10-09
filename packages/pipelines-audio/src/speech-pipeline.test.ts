@@ -82,6 +82,22 @@ function createPlaybackSpy(options?: { autoEnd?: boolean }) {
 }
 
 describe('createSpeechPipeline', () => {
+  it('passes sentence options through to synthesis and prefetches the next sentence', async () => {
+    const { scheduled, playback } = createPlaybackSpy()
+    const pipeline = createSpeechPipeline<string>({
+      segmenterOptions: { sentenceMode: 'japanese' },
+      playback,
+      tts: async request => request.text,
+    })
+    const finished = new Promise<void>(resolve => pipeline.on('onIntentEnd', () => resolve()))
+    const intent = pipeline.openIntent()
+    intent.writeLiteral('急にジャズっぽくなって、ずるくな～い？')
+    intent.writeLiteral('また聴きたいね。')
+    intent.end()
+    await finished
+    expect(scheduled.map(item => item.text)).toEqual(['急にジャズっぽくなって、ずるくな～い？', 'また聴きたいね。'])
+  })
+
   it('preserves playback order when TTS completes out of order', async () => {
     const { scheduled, playback } = createPlaybackSpy()
 

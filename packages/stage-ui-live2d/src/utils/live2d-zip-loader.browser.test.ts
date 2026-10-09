@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 function blobFromBytes(data: Uint8Array): Blob {
   const buffer = new ArrayBuffer(data.byteLength)
@@ -15,21 +15,6 @@ function fileWithRelativePath(content: Blob | string | Uint8Array, name: string,
     value: webkitRelativePath,
   })
   return file
-}
-
-class TestFileReader {
-  result: string | null = null
-  onload: (() => void) | null = null
-  onerror: ((error: unknown) => void) | null = null
-
-  readAsText(file: File): void {
-    void file.text()
-      .then((text) => {
-        this.result = text
-        this.onload?.()
-      })
-      .catch(error => this.onerror?.(error))
-  }
 }
 
 function createShisihangshiSettingsText(): string {
@@ -72,19 +57,41 @@ function createSpacePathSettingsText(): string {
 const appleDoubleHeader = new Uint8Array([0, 5, 22, 7, 0, 2, 0, 0, 77, 97, 99, 32, 79, 83, 32, 88])
 
 describe('live2d zip loader settings sanitization', () => {
-  beforeEach(() => {
-    vi.stubGlobal('window', { Live2DCubismCore: {} })
-    vi.stubGlobal('FileReader', TestFileReader)
-    vi.resetModules()
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
+  it('imports and restores a Cubism 2 model.json with MOC and MTN paths', async () => {
+    await import('./live2d-zip-loader')
+    const { Cubism2ModelSettings, FileLoader, ZipLoader } = await import('./live2d-runtime')
+    const zip = new JSZip()
+    zip.file('normal/model.json', JSON.stringify({
+      model: 'model.moc',
+      textures: ['textures/texture.png'],
+      motions: { idle: [{ file: 'motions/idle.mtn' }] },
+    }))
+    zip.file('normal/model.moc', new Uint8Array([109, 111, 99, 11]))
+    zip.file('normal/textures/texture.png', new Uint8Array([1, 2, 3]))
+    zip.file('normal/motions/idle.mtn', '# Live2D Animator Motion Data')
+    const settings = await ZipLoader.createSettings(zip)
+    expect(settings).toBeInstanceOf(Cubism2ModelSettings)
+    expect(settings.moc).toBe('model.moc')
+    const files = await ZipLoader.unzip(zip, settings)
+    expect(files.map(file => file.webkitRelativePath).sort()).toEqual([
+      'normal/model.moc',
+      'normal/motions/idle.mtn',
+      'normal/textures/texture.png',
+    ])
+    files.push(fileWithRelativePath(await zip.file('normal/model.json')!.async('text'), 'model.json', 'normal/model.json'))
+    const restored = await FileLoader.createSettings(files)
+    try {
+      expect(restored).toBeInstanceOf(Cubism2ModelSettings)
+      expect(() => restored.validateFiles(files.map(file => file.webkitRelativePath))).not.toThrow()
+    }
+    finally {
+      URL.revokeObjectURL((restored as typeof restored & { _objectURL: string })._objectURL)
+    }
   })
 
   it('loads a zip model when model3.json contains Physics: null', async () => {
     await import('./live2d-zip-loader')
-    const { ZipLoader } = await import('pixi-live2d-display/cubism4')
+    const { ZipLoader } = await import('./live2d-runtime')
 
     const zip = new JSZip()
     zip.file('302301_shisihangshi/302301_shisihangshi.model3.json', createShisihangshiSettingsText())
@@ -107,7 +114,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads a zip model whose settings and resources use CJK paths', async () => {
     await import('./live2d-zip-loader')
-    const { FileLoader, Live2DModel, ZipLoader } = await import('pixi-live2d-display/cubism4')
+    const { FileLoader, Live2DModel, ZipLoader } = await import('./live2d-runtime')
 
     const zip = new JSZip()
     zip.file('中文路径模型/测试角色.model3.json', createCjkPathSettingsText())
@@ -147,7 +154,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads a zip model whose settings and resources contain spaces', async () => {
     await import('./live2d-zip-loader')
-    const { FileLoader, Live2DModel, ZipLoader } = await import('pixi-live2d-display/cubism4')
+    const { FileLoader, Live2DModel, ZipLoader } = await import('./live2d-runtime')
 
     const zip = new JSZip()
     zip.file('Model Package/Avatar Model.model3.json', createSpacePathSettingsText())
@@ -188,7 +195,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads a zip model when a macOS AppleDouble settings sidecar is present before the real settings file', async () => {
     await import('./live2d-zip-loader')
-    const { ZipLoader } = await import('pixi-live2d-display/cubism4')
+    const { ZipLoader } = await import('./live2d-runtime')
 
     const zip = new JSZip()
     zip.file('__MACOSX/302301_shisihangshi/._302301_shisihangshi.model3.json', appleDoubleHeader)
@@ -209,7 +216,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('ignores macOS AppleDouble expression sidecars during zip metadata extraction', async () => {
     await import('./live2d-zip-loader')
-    const { ZipLoader } = await import('pixi-live2d-display/cubism4')
+    const { ZipLoader } = await import('./live2d-runtime')
 
     const zip = new JSZip()
     zip.file('302301_shisihangshi/302301_shisihangshi.model3.json', createShisihangshiSettingsText())
@@ -243,7 +250,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads an OPFS-restored file directory when model3.json contains Physics: null', async () => {
     await import('./live2d-zip-loader')
-    const { FileLoader } = await import('pixi-live2d-display/cubism4')
+    const { FileLoader } = await import('./live2d-runtime')
 
     const files = [
       fileWithRelativePath(
@@ -276,7 +283,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads an OPFS-restored file directory whose settings and resources use CJK paths', async () => {
     await import('./live2d-zip-loader')
-    const { FileLoader, Live2DModel } = await import('pixi-live2d-display/cubism4')
+    const { FileLoader, Live2DModel } = await import('./live2d-runtime')
 
     const files = [
       fileWithRelativePath(
@@ -320,7 +327,7 @@ describe('live2d zip loader settings sanitization', () => {
 
   it('loads an OPFS-restored file directory when a macOS AppleDouble settings sidecar is present before the real settings file', async () => {
     await import('./live2d-zip-loader')
-    const { FileLoader } = await import('pixi-live2d-display/cubism4')
+    const { FileLoader } = await import('./live2d-runtime')
 
     const files = [
       fileWithRelativePath(

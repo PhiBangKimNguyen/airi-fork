@@ -396,6 +396,7 @@ export class Client<C = undefined> {
       mode: 'message' as const,
       interval: this.opts.heartbeat.pingInterval,
       timeout: this.opts.heartbeat.readTimeout,
+      isResponse: (message: WebSocketEvent<C>) => message.type === 'transport:connection:heartbeat' && message.data.kind === MessageHeartbeatKind.Pong,
       message: () => this.createPayload({
         type: 'transport:connection:heartbeat',
         data: {

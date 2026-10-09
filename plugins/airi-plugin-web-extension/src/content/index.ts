@@ -9,7 +9,7 @@ const SUBTITLE_DEDUPE_WINDOW = 2000
 const lastPayloadByType = new Map<string, string>()
 
 function safeSend(message: ContentToBackgroundMessage) {
-  const serialized = JSON.stringify(message.payload)
+  const serialized = JSON.stringify('payload' in message ? message.payload : null)
   const lastSerialized = lastPayloadByType.get(message.type)
   if (serialized === lastSerialized)
     return
@@ -26,9 +26,42 @@ function buildPageContext(site: VideoSite): PageContextPayload {
     site,
     url: location.href,
     title: normalizeText(document.title),
-    description: description || ogDescription || undefined,
+    // YouTube keeps the previous video's meta description during playlist navigation. Omit that unverified field.
+    description: site === 'youtube' ? undefined : description || ogDescription || undefined,
     language: document.documentElement.lang || undefined,
+    visibleText: readVisibleText(),
   }
+}
+
+/** Reads rendered paragraphs in the shared tab. Form values and off-screen history are excluded. */
+function readVisibleText() {
+  const lines: string[] = []
+  let length = 0
+  const roots: ParentNode[] = [document]
+  for (const root of roots) {
+    for (const element of root.querySelectorAll('*')) {
+      if (element.shadowRoot)
+        roots.push(element.shadowRoot)
+    }
+    for (const element of root.querySelectorAll('h1, h2, h3, p, [slot="text-body"], [data-test-id="post-content"]')) {
+      if (element.closest('form, nav, header, footer, [contenteditable], textarea, input, [hidden], [aria-hidden="true"]'))
+        continue
+      const rect = element.getBoundingClientRect()
+      if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= window.innerHeight)
+        continue
+      if (!(element instanceof HTMLElement) || getComputedStyle(element).visibility === 'hidden')
+        continue
+      // eslint-disable-next-line unicorn/prefer-dom-node-text-content -- Rendered text excludes hidden descendants in the shared page.
+      const text = normalizeText(element.innerText).slice(0, 1000)
+      if (!text || lines.includes(text))
+        continue
+      lines.push(text)
+      length += text.length
+      if (length >= 4000)
+        return lines.join('\n').slice(0, 4000)
+    }
+  }
+  return lines.join('\n').slice(0, 4000)
 }
 
 function buildVideoContext(site: VideoSite, video: HTMLVideoElement, includeProgress = false): VideoContextPayload {
@@ -143,7 +176,11 @@ function observeTextTracks(site: VideoSite, video: HTMLVideoElement, onSubtitle:
   const observer = new MutationObserver(() => attach())
   observer.observe(video, { attributes: true, childList: true, subtree: true })
 
-  return () => observer.disconnect()
+  return () => {
+    observer.disconnect()
+    for (const track of Array.from(video.textTracks))
+      track.oncuechange = null
+  }
 }
 
 function observeSubtitleDom(site: VideoSite, onSubtitle: (payload: SubtitlePayload) => void) {
@@ -171,6 +208,7 @@ function observeSubtitleDom(site: VideoSite, onSubtitle: (payload: SubtitlePaylo
       title: normalizeText(findVideoTitle(site)) || undefined,
       videoId: extractVideoId(site, location.href),
       text,
+      language: Array.from(document.querySelector('video')?.textTracks ?? []).find(track => track.mode === 'showing')?.language || undefined,
     })
   }
 
@@ -316,11 +354,12 @@ function observeVideo(site: VideoSite) {
 }
 
 export function startContentObserver() {
+  lastPayloadByType.clear()
   const site = detectSiteFromUrl(location.href)
   safeSend({ type: 'content:page', payload: buildPageContext(site) })
   const stopVideo = observeVideo(site)
 
-  browser.runtime.onMessage.addListener((message: BackgroundToContentMessage) => {
+  const onMessage = (message: BackgroundToContentMessage) => {
     if (message.type === 'background:request-vision-frame') {
       const video = document.querySelector('video') as HTMLVideoElement | null
       if (!video)
@@ -329,10 +368,15 @@ export function startContentObserver() {
       const frame = captureVisionFrame(site, video)
       if (frame)
         safeSend({ type: 'content:vision:frame', payload: frame })
+      else
+        safeSend({ type: 'content:vision:error' })
     }
-  })
+  }
+  browser.runtime.onMessage.addListener(onMessage)
 
   return () => {
     stopVideo?.()
+    browser.runtime.onMessage.removeListener(onMessage)
+    lastPayloadByType.clear()
   }
 }

@@ -152,6 +152,21 @@ describe('synthesizeSpeech', () => {
     })
   })
 
+  it.each(['original', 'j'] as const)('sends %s prosody without changing the selected voice or controls', async (prosody) => {
+    const engine = fakeEngine()
+
+    await synthesizeSpeech(
+      'http://localhost:50021/',
+      { parameters: { prosody, speed: 0.9, pitch: 0.02 }, styleId: '8', text: 'こんにちは。' },
+      { fetch: engine.fetch },
+    )
+
+    expect(engine.calls[0].url.searchParams.get('airi_prosody')).toBe(prosody)
+    expect(engine.calls.every(call => call.url.searchParams.get('speaker') === '8')).toBe(true)
+    expect(JSON.parse(String(engine.calls[1].init.body))).toMatchObject({ speedScale: 0.9, pitchScale: 0.02 })
+    expect(engine.calls[1].url.searchParams.has('airi_prosody')).toBe(false)
+  })
+
   it('returns the synthesis bytes unchanged', async () => {
     const engine = fakeEngine()
 

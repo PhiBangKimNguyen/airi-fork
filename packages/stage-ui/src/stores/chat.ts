@@ -4,6 +4,7 @@ import type { WebSocketEventInputs } from '@proj-airi/server-sdk'
 import type { Message } from '@xsai/shared-chat'
 import type { SyncedPiniaRuntime } from 'pinia-plugin-synced'
 
+import type { CloudProvider } from '../libs/privacy-routing'
 import type { ChatHistoryItem, ChatToolReference } from '../types/chat'
 import type { ToolCallRerunPayload } from './tool-call-rerun'
 
@@ -21,6 +22,7 @@ import { activeTurnSpan, startSpan } from '../composables/use-io-tracer'
 import { useChatVision } from '../composables/vision/use-chat-vision'
 import { useVisionInference } from '../composables/vision/use-vision-inference'
 import { extractMessageText, isCloudSyncableMessage } from '../libs/chat-sync'
+import { hybridEnabled } from '../libs/privacy-routing'
 import { createChatAnalyticsHooks, getProviderMode } from '../libs/product-signals/events/chat'
 import {
   AIRI_CHAT_APP_SURFACE_HEADER,
@@ -44,6 +46,7 @@ import { useConsciousnessStore } from './modules/consciousness'
 import { useStickersStore } from './modules/stickers'
 import { useVisionStore } from './modules/vision'
 import { useWebSearchStore } from './modules/web-search'
+import { usePrivacyRoutingStore } from './privacy-routing'
 import { executeToolCallRerun } from './tool-call-rerun'
 
 interface ForkOptions {
@@ -55,6 +58,8 @@ interface ForkOptions {
 
 /** A serializable chat request that any application context can send to the leader. */
 export interface ChatSendPayload {
+  /** Only the interactive text composer can certify authored text without machine-derived input. */
+  cloudSafeText?: boolean
   /** Stable identity for transport retries and persistence acknowledgment. */
   messageId?: string
   /** Image attachments for the new user message. */
@@ -197,6 +202,7 @@ export const useChatStore = defineStore('chat', () => {
   const chatSession = useChatSessionStore()
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
+  const privacy = hybridEnabled ? usePrivacyRoutingStore() : undefined
   const cardStore = useAiriCardStore()
   const stickersStore = useStickersStore()
   const contextObservability = useContextObservabilityStore()
@@ -262,6 +268,12 @@ export const useChatStore = defineStore('chat', () => {
     context: Conversation,
     options?: StreamOptions,
   ) {
+    const correlation = options?.requestCorrelation
+    const route = correlation ? privacy?.router.get(correlation.conversationId, correlation.turnId) : undefined
+    if (privacy && route && route.lane !== 'local') {
+      await llmStore.stream(model, chatProvider, context, options)
+      return
+    }
     let llmTextLength = 0
     let llmOutputChunkCount = 0
     const llmOutputChunkLengths: number[] = []
@@ -494,7 +506,7 @@ export const useChatStore = defineStore('chat', () => {
         roundId,
         turnIndex,
       })
-      if (isCloudSyncableMessage(message)) {
+      if (!hybridEnabled && isCloudSyncableMessage(message)) {
         void chatSession.pushMessageToCloud(sessionId, {
           id: message.id,
           role: 'user',
@@ -505,7 +517,7 @@ export const useChatStore = defineStore('chat', () => {
     },
     onAssistantMessageAppended: ({ sessionId, message, roundId }) => {
       const source = chatSession.getSessionMessages(sessionId).find(message => message.role === 'user' && message.id === roundId)
-      if (source && isCloudSyncableMessage(source) && isCloudSyncableMessage(message) && message.id) {
+      if (!hybridEnabled && source && isCloudSyncableMessage(source) && isCloudSyncableMessage(message) && message.id) {
         void chatSession.pushMessageToCloud(sessionId, {
           id: message.id,
           role: 'assistant',
@@ -514,11 +526,15 @@ export const useChatStore = defineStore('chat', () => {
       }
     },
     onUserTurnReady: ({ messageText, sessionMessages }) => {
+      if (hybridEnabled)
+        return
       const autonomousTarget = cardStore.activeCard?.extensions?.airi?.modules?.artistry?.autonomousTarget || 'user'
       if (autonomousTarget === 'user')
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))
     },
     onAssistantTurnReady: ({ messageText, sessionMessages }) => {
+      if (hybridEnabled)
+        return
       const artistry = cardStore.activeCard?.extensions?.airi?.modules?.artistry
       if (artistry?.autonomousEnabled && artistry?.autonomousTarget === 'assistant')
         void artistryAutonomousStore.runArtistTask(messageText, toProviderHistory(sessionMessages))
@@ -540,6 +556,11 @@ export const useChatStore = defineStore('chat', () => {
     const sessionId = targetSessionId ?? activeSessionId.value
     const generation = chatSession.getSessionGeneration(sessionId)
     const messageId = options.messageId ?? nanoid()
+    if (privacy) {
+      privacy.capture({ sessionId, turnId: messageId, text: sendingMessage, privateInput: true, ambient: true, historyExists: true })
+      const local = await privacy.provider('local')
+      options = { ...options, model: local.model, chatProvider: local.provider, providerId: 'hybrid-local' }
+    }
     const key = JSON.stringify([sessionId, messageId])
     const existing = requests.get(key)
     if (existing)
@@ -567,7 +588,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     requests.set(key, { sessionId, abort, request })
     void request.accepted.catch(() => {})
-    void request.done.finally(() => requests.delete(key)).catch(() => {})
+    void request.done.finally(() => {
+      requests.delete(key)
+      privacy?.router.release(sessionId, messageId)
+    }).catch(() => {})
     return request.done
   }
 
@@ -611,19 +635,30 @@ export const useChatStore = defineStore('chat', () => {
 
     signal.throwIfAborted()
 
-    const providerId = activeProvider.value
-    const modelId = activeModel.value
+    if (privacy && ['hybrid-kimi', 'hybrid-gemini', 'hybrid-gemma31', 'hybrid-gemma26', 'hybrid-inkling'].includes(activeProvider.value))
+      privacy.switchProvider(activeProvider.value.slice('hybrid-'.length) as CloudProvider)
+    const route = privacy?.capture({
+      sessionId: payload.sessionId,
+      turnId: payload.messageId!,
+      text: payload.text,
+      privateInput: !payload.cloudSafeText || !!payload.attachments?.length || !!payload.input || !!payload.tools?.length,
+      ambient: Object.keys(chatContext.getContextsSnapshot()).length > 0,
+      historyExists: chatSession.getSessionMessages(payload.sessionId).some(message => message.role !== 'system'),
+    })
+    const routedProvider = route ? await privacy!.provider(route.lane) : undefined
+    const providerId = route ? `hybrid-${route.lane}` : activeProvider.value
+    const modelId = routedProvider?.model ?? activeModel.value
 
     const temperature = payload.temperature ?? consciousnessStore.activeTemperature
     const topP = payload.topP ?? consciousnessStore.activeTopP
     const systemPromptSupplement = llmToolsetPromptsStore.activeToolsetPrompt
-    if (!chatReady.value)
+    if (!privacy && !chatReady.value)
       throw new Error('No active chat provider or model configured')
 
     const stickers = await stickersStore.selectCatalogForReply()
     signal.throwIfAborted()
 
-    const chatProvider = await consciousnessStore.getChatProviderInstance(providerId)
+    const chatProvider = routedProvider?.provider ?? await consciousnessStore.getChatProviderInstance(providerId)
     signal.throwIfAborted()
 
     if (!chatProvider)
@@ -659,7 +694,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const abort = new AbortController()
     const prepared = prepareSend({ ...payload, messageId }, abort.signal)
-      .then(options => runtime.submit(payload.text, options, payload.sessionId))
+      .then(options => runtime.submit(privacy?.router.get(payload.sessionId, messageId)?.text ?? payload.text, options, payload.sessionId))
     const request = {
       accepted: prepared.then(value => value.accepted),
       done: prepared.then(value => value.done),
@@ -667,7 +702,10 @@ export const useChatStore = defineStore('chat', () => {
 
     requests.set(key, { sessionId: payload.sessionId, abort, request })
     void request.accepted.catch(() => {})
-    void request.done.finally(() => requests.delete(key)).catch(() => {})
+    void request.done.finally(() => {
+      requests.delete(key)
+      privacy?.router.release(payload.sessionId, messageId)
+    }).catch(() => {})
 
     return request
   }
@@ -694,6 +732,20 @@ export const useChatStore = defineStore('chat', () => {
   /** Sends one serializable chat request through the elected leader. */
   async function send(payload: ChatSendPayload): Promise<ChatSendResult> {
     try {
+      if (privacy) {
+        const command = /^\/provider\s+(kimi|gemini|gemma31|gemma26|inkling)\s*$/i.exec(payload.text)
+        if (command && payload.cloudSafeText && !payload.attachments?.length && !payload.input) {
+          privacy.switchProvider(command[1].toLowerCase() as CloudProvider)
+          privacy.mode = 'cloud'
+          const lane = command[1].toLowerCase()
+          const selected = await cardStore.updateActiveCardConsciousness({ provider: `hybrid-${lane}`, model: `airi-${lane}` })
+          if (!selected) {
+            consciousnessStore.activeProvider = `hybrid-${lane}`
+            consciousnessStore.activeModel = `airi-${lane}`
+          }
+          return { messages: [], sessionId: payload.sessionId }
+        }
+      }
       return await executeSend(payload)
     }
     catch (error) {
@@ -755,6 +807,8 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Clears one session and stops runtime work that still belongs to it. */
   async function cleanup(sessionId: string) {
+    privacy?.router.clear(sessionId)
+    privacy?.save()
     failedImageReads.delete(sessionId)
     chatSession.cleanupMessages(sessionId)
     chatContext.resetContexts()
@@ -764,6 +818,8 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Cancels queued work before permanently removing its owning session. */
   async function deleteSession(sessionId: string): Promise<void> {
+    privacy?.router.clear(sessionId)
+    privacy?.save()
     failedImageReads.delete(sessionId)
     await cancelPendingSends(sessionId)
     return chatSession.deleteSession(sessionId)

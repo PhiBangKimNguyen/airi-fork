@@ -1,0 +1,24 @@
+{
+  "shareTab": "Share this tab",
+  "stopSharing": "Stop sharing",
+  "sharingDescription": "Share one tab. Follow YouTube videos keeps sharing active for the next video in this tab. Other navigation stops sharing. Cloud vision sends cropped video frames and captions. Audio ears sends tab audio to Gemini.",
+  "followYouTubeVideos": "Follow YouTube videos in this shared tab",
+  "audioEars": "Audio ears (Gemini for public video, re-share to start)",
+  "inklingResearchMedia": "Synthetic/non-personal test media: allow free Inkling (no human voices or faces)",
+  "localVideoVision": "Local video vision (Qwen, cloud vision off)",
+  "audioBlocked": "Tab audio capture failed. Open this popup on the playing video, stop sharing, then share again.",
+  "cloudVideoVision": "Cloud video vision",
+  "frameBlocked": "This player blocked video frame capture. Try another video or enable captions for text reactions with cloud video vision off.",
+  "loopbackRequired": "Browser context requires a literal loopback WebSocket URL.",
+  "selectPage": "Select a normal web page before sharing.",
+  "reloadPage": "Reload the selected page, then share it again.",
+  "cloudVideoModel": "Cloud video model",
+  "cloudVideoModelDescription": "Choose the model for video reactions. Apply settings to save. Typed chat and Gemini audio ears keep their own models.",
+  "cloudVideoModels": {
+    "gemini": "Gemini",
+    "kimi": "Kimi K3",
+    "gemma31": "Gemma 4 31B (free)",
+    "gemma26": "Gemma 4 26B A4B (free)",
+    "inkling": "Inkling (synthetic media only)"
+  }
+}

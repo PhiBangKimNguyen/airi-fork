@@ -2,6 +2,31 @@
 
 Shared core for stage
 
+## Video reaction motions
+
+Video and viewing-habit replies choose an emotion cue with their spoken reaction.
+The media boundary removes `[emotion=NAME]` before duplicate checks, captions, and speech.
+The speech intent carries an ACT token through the existing Eventa bus.
+The stage applies the cue once when that reply starts playback. Failed or canceled speech discards the cue.
+Automatic reactions call the scene directly without changing the persisted motion selection.
+An identical active motion continues. After it finishes, the same cue can play it again.
+
+AK-Alfa archives with an `akalfa`, `ak-alfa`, or `ak_alfa` file name use their authored touch motions.
+The profile maps the five authored motions to these cues:
+
+| Reaction | Motion |
+| --- | --- |
+| Bashful | `touch_1.mtn` |
+| Dreamy or zoned out | `touch_2.mtn` |
+| Surprised | `touch_3.mtn` |
+| Delighted | `touch_4.mtn` |
+| Curious | `touch_5.mtn` |
+
+The internal `think` cue selects the dreamy animation. It does not select anger or protest.
+Motion file names determine the loaded group and index. Other models retain their existing emotion handling.
+Neutral reactions send no new gesture. Silence and repeated replies trigger no new motion.
+Login, wedding, and wait animations remain manual.
+
 ## Experimental features
 
 Register flags in `libs/feature-flags.ts`. Read their state through `useFeatureFlagsStore().isEnabled(key)`.
