@@ -4,6 +4,8 @@ export interface GatewayProfile {
   model: string
   apiKey: string
   fallbackApiKeys?: readonly string[]
+  /** Cloudflare quota failures use this paired account endpoint and token before another model role. */
+  fallbackAccount?: { baseUrl: string, apiKey: string }
   private: boolean
   reasoningEffort?: string
   mediaModel?: string

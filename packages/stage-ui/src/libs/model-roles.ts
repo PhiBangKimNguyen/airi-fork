@@ -24,6 +24,10 @@ const decisionSchema = v.object({
   escalation_reason: v.optional(v.nullable(shortText)),
 })
 const completionSchema = v.object({ choices: v.pipe(v.array(v.object({ message: v.object({ content: v.nullable(v.string()) }) })), v.minLength(1)) })
+const cloudflareErrorSchema = v.object({
+  errors: v.optional(v.array(v.object({ code: v.number() }))),
+  error: v.optional(v.object({ code: v.number() })),
+})
 const translationSchema = v.object({ translation: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(16000), v.regex(/[a-z]/i)) })
 
 // Provider grammars enforce field types before local validation. Model prose never substitutes for an action.
@@ -136,14 +140,22 @@ function unwrappedTranslation(text: string): string {
  */
 export class ModelRoleRouter {
   private readonly blockedUntil = new Map<string, number>()
+  // Cloudflare quota cooldowns belong to accounts, across tokens and model roles, for this gateway lifetime.
+  private readonly accountBlockedUntil = new Map<string, number>()
   private readonly observations = new Map<string, { at: number, value: VisualObservation }>()
   private readonly pending = new Set<string>()
   private readonly recentEvents = new Map<string, number>()
 
   constructor(private readonly roles: ModelRoles, private readonly replyLanguage?: 'ja' | 'ja-en') {
     for (const profile of Object.values(roles)) {
-      if (profile)
-        completionDestination(profile)
+      if (!profile)
+        continue
+      const endpoint = completionDestination(profile)
+      if (profile.fallbackAccount) {
+        const secondary = completionDestination({ ...profile, ...profile.fallbackAccount })
+        if (profile.private || endpoint.hostname !== 'api.cloudflare.com' || secondary.hostname !== 'api.cloudflare.com' || !profile.fallbackAccount.apiKey.trim())
+          throw new Error('Account fallback requires paired Cloudflare endpoints and credentials.')
+      }
     }
     if (roles.fallback && !roles.fallback.private)
       throw new Error('The local fallback requires a private profile.')
@@ -154,11 +166,6 @@ export class ModelRoleRouter {
     if (!profile?.model || (!profile.private && !profile.apiKey))
       throw new Error('Model role is not configured.')
     const endpoint = completionDestination(profile)
-    // Roles that share an account also share quota cooldowns. Keys never enter logs or the renderer.
-    const quota = `${endpoint.origin}${endpoint.pathname}:${profile.apiKey}`
-    const model = `${quota}:${profile.model}`
-    if (Math.max(this.blockedUntil.get(quota) ?? 0, this.blockedUntil.get(model) ?? 0) > Date.now())
-      throw new Error('Model role is cooling down.')
     signal.throwIfAborted()
     const started = Date.now()
     const decision = this.replyLanguage === 'ja-en'
@@ -184,51 +191,87 @@ export class ModelRoleRouter {
     if (operation === 'translation' && endpoint.hostname === 'api.groq.com' && profile.model.startsWith('qwen/qwen3'))
       reasoningEffort = 'none'
     const timeoutMs = profile.timeoutMs ?? 15_000
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(operation === 'translation' ? Math.min(timeoutMs, 10_000) : timeoutMs)])
+    // Only quota rejection or its active cooldown selects the paired second account. Other failures retain role fallback policy.
+    const accounts = profile.fallbackAccount ? [profile, { ...profile, ...profile.fallbackAccount }] : [profile]
     console.info('Model role requested', { role, operation })
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(profile.apiKey ? { authorization: `Bearer ${profile.apiKey}` } : {}) },
-        redirect: 'error',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(operation === 'translation' ? Math.min(timeoutMs, 10_000) : timeoutMs)]),
-        body: JSON.stringify({
-          model: profile.model,
-          messages,
-          stream: false,
-          ...(endpoint.hostname === 'api.groq.com' ? { response_format: { type: 'json_object' } } : {}),
-          ...(endpoint.hostname === 'api.cloudflare.com' ? { response_format: { type: 'json_schema', json_schema: { name: formatName, schema: format } } } : {}),
-          max_tokens: maxTokens,
-          ...(operation === 'translation' ? { temperature: 0.2 } : {}),
-          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-          ...(endpoint.hostname === 'api.cloudflare.com' ? { options: { rejectIfBusy: true } } : {}),
-          ...(endpoint.hostname === 'api.cloudflare.com' && profile.thinking !== undefined ? { chat_template_kwargs: { enable_thinking: profile.thinking } } : {}),
-        }),
-      })
-      if (!response.ok) {
-        const retryAfter = response.headers.get('retry-after')
-        const seconds = retryAfter ? Number(retryAfter) : Number.NaN
-        const date = retryAfter ? Date.parse(retryAfter) : Number.NaN
-        const delay = Number.isFinite(seconds) ? seconds * 1000 : date - Date.now()
-        const blocked = [401, 403, 429].includes(response.status) ? quota : model
-        this.blockedUntil.set(blocked, Date.now() + Math.max(response.status === 429 ? 60_000 : 15_000, Number.isFinite(delay) ? delay : 0))
-        console.warn('Model role unavailable', { role, status: response.status, rateLimited: response.status === 429 })
-        await response.body?.cancel()
+    for (const accountProfile of accounts) {
+      requestSignal.throwIfAborted()
+      const accountEndpoint = completionDestination(accountProfile)
+      const account = `${accountEndpoint.origin}${accountEndpoint.pathname}`
+      if ((this.accountBlockedUntil.get(account) ?? 0) > Date.now())
+        continue
+      const quota = `${account}:${accountProfile.apiKey}`
+      const model = `${quota}:${profile.model}`
+      if (Math.max(this.blockedUntil.get(quota) ?? 0, this.blockedUntil.get(model) ?? 0) > Date.now())
+        throw new Error('Model role is cooling down.')
+      try {
+        const response = await fetch(accountEndpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(accountProfile.apiKey ? { authorization: `Bearer ${accountProfile.apiKey}` } : {}) },
+          redirect: 'error',
+          signal: requestSignal,
+          body: JSON.stringify({
+            model: profile.model,
+            messages,
+            stream: false,
+            ...(endpoint.hostname === 'api.groq.com' ? { response_format: { type: 'json_object' } } : {}),
+            ...(endpoint.hostname === 'api.cloudflare.com' ? { response_format: { type: 'json_schema', json_schema: { name: formatName, schema: format } } } : {}),
+            max_tokens: maxTokens,
+            ...(operation === 'translation' ? { temperature: 0.2 } : {}),
+            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...(endpoint.hostname === 'api.cloudflare.com' ? { options: { rejectIfBusy: true } } : {}),
+            ...(endpoint.hostname === 'api.cloudflare.com' && profile.thinking !== undefined ? { chat_template_kwargs: { enable_thinking: profile.thinking } } : {}),
+          }),
+        })
+        if (!response.ok) {
+          const retryAfter = response.headers.get('retry-after')
+          const seconds = retryAfter ? Number(retryAfter) : Number.NaN
+          const date = retryAfter ? Date.parse(retryAfter) : Number.NaN
+          const delay = Number.isFinite(seconds) ? seconds * 1000 : date - Date.now()
+          if (response.status === 429 && endpoint.hostname === 'api.cloudflare.com') {
+            // A non-JSON rate-limit response still uses the HTTP status. Provider text never enters speech or logs.
+            const error = v.safeParse(cloudflareErrorSchema, await response.clone().json().catch(() => undefined))
+            const exhausted = error.success && (error.output.error?.code === 3036 || error.output.errors?.some(item => item.code === 3036))
+            const busy = error.success && (error.output.error?.code === 3040 || error.output.errors?.some(item => item.code === 3040))
+            // Cloudflare 3040 rejects busy models. Switching accounts cannot resolve model capacity.
+            // Source: https://developers.cloudflare.com/workers-ai/platform/errors/
+            if (!busy) {
+              let until = Date.now() + Math.max(60_000, Number.isFinite(delay) ? delay : 0)
+              if (exhausted) {
+                // Daily allocation resets at 00:00 UTC. The primary account returns after that reset.
+                // Source: https://developers.cloudflare.com/workers-ai/platform/pricing/
+                const now = new Date()
+                until = Math.max(Date.now() + (Number.isFinite(delay) ? Math.max(0, delay) : 0), Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+              }
+              this.accountBlockedUntil.set(account, until)
+              await response.body?.cancel()
+              console.warn('Model role account quota unavailable', { role })
+              continue
+            }
+          }
+          const blocked = [401, 403, 429].includes(response.status) ? quota : model
+          this.blockedUntil.set(blocked, Date.now() + Math.max(response.status === 429 ? 60_000 : 15_000, Number.isFinite(delay) ? delay : 0))
+          console.warn('Model role unavailable', { role, status: response.status, rateLimited: response.status === 429 })
+          await response.body?.cancel()
+          throw new Error('Model role unavailable.')
+        }
+        const output = v.safeParse(completionSchema, await response.json())
+        if (!output.success || !output.output.choices[0]?.message.content)
+          throw new Error('Model role returned no content.')
+        return output.output.choices[0].message.content
+      }
+      catch {
+        // Transport failures back off and retain the existing role fallback policy.
+        if (!signal.aborted && (this.blockedUntil.get(model) ?? 0) <= Date.now())
+          this.blockedUntil.set(model, Date.now() + 15_000)
         throw new Error('Model role unavailable.')
       }
-      const output = v.safeParse(completionSchema, await response.json())
-      if (!output.success || !output.output.choices[0]?.message.content)
-        throw new Error('Model role returned no content.')
-      return output.output.choices[0].message.content
+      finally {
+        console.info('Model role latency', { role, operation, milliseconds: Date.now() - started })
+      }
     }
-    catch {
-      // Transport failures also back off. No retry loop runs within a role.
-      if (!signal.aborted && (this.blockedUntil.get(model) ?? 0) <= Date.now())
-        this.blockedUntil.set(model, Date.now() + 15_000)
-      throw new Error('Model role unavailable.')
-    }
-    finally {
-      console.info('Model role latency', { role, operation, milliseconds: Date.now() - started })
-    }
+    throw new Error('Model role accounts are cooling down.')
   }
 
   private async perceive(messages: Message[], signal: AbortSignal): Promise<Message[]> {
@@ -308,7 +351,8 @@ export class ModelRoleRouter {
   }
 
   /**
-   * Runs vision only for supplied frames, then at most one call per reasoning tier.
+   * Runs vision only for supplied frames, then one decision per reasoning tier.
+   * Cloudflare quota rejection can retry a decision on its paired fallback account.
    * Public bilingual speech adds one English rendering call to configured reasoning, or its dialogue role when reasoning is absent.
    * Private bilingual speech renders English on its successful local role.
    * Repeated ambient evidence produces no provider call.

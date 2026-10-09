@@ -17,12 +17,21 @@ export function configureModelRoles(settings: Record<string, string>, keys: Reco
   const account = settings.CLOUDFLARE_ACCOUNT_ID || keys.CLOUDFLARE_ACCOUNT_ID
   if (!account || !/^[a-f0-9]{32}$/i.test(account))
     throw new Error('Model roles require a valid Cloudflare account ID.')
+  // An override replaces the complete pair. Tokens from another key file cannot authenticate the overridden account.
+  const secondaryKeys = settings.CLOUDFLARE_ACCOUNT_ID_2 || settings.CLOUDFLARE_AI_API_TOKEN_2 ? settings : keys
+  const secondaryAccount = secondaryKeys.CLOUDFLARE_ACCOUNT_ID_2
+  const secondaryToken = secondaryKeys.CLOUDFLARE_AI_API_TOKEN_2
+  if ((secondaryAccount || secondaryToken) && (!secondaryAccount || !/^[a-f0-9]{32}$/i.test(secondaryAccount) || !secondaryToken?.trim()))
+    throw new Error('Cloudflare fallback requires a valid second account ID and its API token.')
   const providers: Record<string, GatewayProfile> = {
     ...profiles,
     cloudflare: {
       baseUrl: `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/`,
       model: '',
       apiKey: settings.CLOUDFLARE_AI_API_TOKEN || keys.CLOUDFLARE_AI_API_TOKEN || '',
+      fallbackAccount: secondaryAccount && secondaryToken
+        ? { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${secondaryAccount}/ai/v1/`, apiKey: secondaryToken }
+        : undefined,
       private: false,
     },
     groq: { baseUrl: 'https://api.groq.com/openai/v1/', model: '', apiKey: settings.GROQ_API_KEY || keys.GROQ_API_KEY || '', private: false },

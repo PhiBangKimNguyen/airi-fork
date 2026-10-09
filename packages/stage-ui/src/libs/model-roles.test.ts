@@ -21,9 +21,108 @@ const signal = () => new AbortController().signal
 const reply = (decision: unknown) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(decision) } }] }))
 const speak = { action: 'speak', text: 'Character reply.' }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 describe('model roles', () => {
+  it('shares account quota cooldowns between vision and brain and returns to primary after midnight UTC', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-09T23:58:00Z'))
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const observation = { summary: 'A cat.', interesting: true }
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ code: 3036 }] }), { status: 429 }))
+      .mockResolvedValueOnce(reply(observation))
+      .mockImplementation(async () => reply(speak))
+    const router = new ModelRoleRouter({ brain: { ...brain, fallbackAccount }, vision: { ...brain, model: 'vision-model', fallbackAccount } })
+    const frames: Message[] = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,YWJj' } }] }]
+    expect((await router.react(frames, false, signal())).text).toBe('Character reply.')
+    expect(String(transport.mock.calls[0]?.[0])).toContain(`/accounts/${'a'.repeat(32)}/`)
+    expect(String(transport.mock.calls[1]?.[0])).toContain(`/accounts/${'b'.repeat(32)}/`)
+    expect(String(transport.mock.calls[2]?.[0])).toContain(`/accounts/${'b'.repeat(32)}/`)
+    vi.setSystemTime(new Date('2026-10-10T00:00:01Z'))
+    await router.react(context, false, signal())
+    expect(String(transport.mock.calls[3]?.[0])).toContain(`/accounts/${'a'.repeat(32)}/`)
+  })
+
+  it('uses Groq when both accounts are exhausted and skips both during cooldown', async () => {
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const exhausted = () => new Response(JSON.stringify({ errors: [{ code: 3036 }] }), { status: 429 })
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(exhausted())
+      .mockResolvedValueOnce(exhausted())
+      .mockImplementation(async () => reply(speak))
+    const router = new ModelRoleRouter({ ...roles, brain: { ...brain, fallbackAccount } })
+    expect((await router.react(context, false, signal())).action).toBe('speak')
+    expect((await router.react(context, false, signal())).action).toBe('speak')
+    expect(transport).toHaveBeenCalledTimes(4)
+    expect(String(transport.mock.calls[2]?.[0])).toContain('api.groq.com')
+    expect(String(transport.mock.calls[3]?.[0])).toContain('api.groq.com')
+  })
+
+  it('honors Retry-After for an unstructured Cloudflare rate limit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-09T12:00:00Z'))
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('Rate limited', { status: 429, headers: { 'retry-after': 'Fri, 09 Oct 2026 12:02:00 GMT' } }))
+      .mockImplementation(async () => reply(speak))
+    const router = new ModelRoleRouter({ brain: { ...brain, fallbackAccount } })
+    await router.react(context, false, signal())
+    vi.setSystemTime(new Date('2026-10-09T12:01:30Z'))
+    await router.react(context, false, signal())
+    expect(String(transport.mock.calls[2]?.[0])).toContain(`/accounts/${'b'.repeat(32)}/`)
+    vi.setSystemTime(new Date('2026-10-09T12:02:01Z'))
+    await router.react(context, false, signal())
+    expect(String(transport.mock.calls[3]?.[0])).toContain(`/accounts/${'a'.repeat(32)}/`)
+  })
+
+  it.each([400, 401, 403, 429, 500])('retains role fallback for non-quota HTTP %s errors', async (status) => {
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ code: 3040 }] }), { status }))
+      .mockImplementation(async () => reply(speak))
+    await new ModelRoleRouter({ ...roles, brain: { ...brain, fallbackAccount } }).react(context, false, signal())
+    expect(transport).toHaveBeenCalledTimes(2)
+    expect(String(transport.mock.calls[1]?.[0])).toContain('api.groq.com')
+  })
+
+  it('does not send fallback credentials to another host or a private route', () => {
+    const fallbackAccount = { baseUrl: 'https://api.groq.com/openai/v1/', apiKey: 'synthetic-secondary' }
+    expect(() => new ModelRoleRouter({ brain: { ...brain, fallbackAccount } })).toThrow('Cloudflare')
+    expect(() => new ModelRoleRouter({ brain: { ...roles.fallback!, fallbackAccount } })).toThrow()
+  })
+
+  it('does not switch accounts after cancellation of a quota rejection', async () => {
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const controller = new AbortController()
+    const transport = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      controller.abort()
+      return new Response(JSON.stringify({ errors: [{ code: 3036 }] }), { status: 429 })
+    })
+    await expect(new ModelRoleRouter({ ...roles, brain: { ...brain, fallbackAccount } }).react(context, false, controller.signal)).rejects.toThrow()
+    expect(transport).toHaveBeenCalledOnce()
+  })
+
+  it('retries an exhausted Cloudflare account with its paired fallback credentials', async () => {
+    const fallbackAccount = { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'b'.repeat(32)}/ai/v1/`, apiKey: 'synthetic-secondary' }
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ code: 3036, message: 'Daily allocation exhausted.' }] }), { status: 429 }))
+      .mockImplementation(async () => reply(speak))
+    const router = new ModelRoleRouter({ ...roles, brain: { ...brain, fallbackAccount } })
+    expect((await router.react(context, false, signal())).text).toBe('Character reply.')
+    expect((await router.react(context, false, signal())).text).toBe('Character reply.')
+    expect(transport).toHaveBeenCalledTimes(3)
+    expect(String(transport.mock.calls[0]?.[0])).toContain(`/accounts/${'a'.repeat(32)}/`)
+    for (const call of transport.mock.calls.slice(1)) {
+      expect(String(call[0])).toContain(`/accounts/${'b'.repeat(32)}/`)
+      expect(new Headers(call[1]?.headers).get('authorization')).toBe('Bearer synthetic-secondary')
+      expect(JSON.parse(String(call[1]?.body)).model).toBe(brain.model)
+    }
+  })
+
   it('replaces an embedded draft caption instead of appending a second translation', async () => {
     const japanese = 'あー、やっぱり、この曲は雰囲気作りがすごいね。'
     const draft = 'Ah, this song really excels at setting the mood.'

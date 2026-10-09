@@ -8,6 +8,22 @@ Shared character behavior belongs in `packages/stage-ui`. Use `stage-web` for br
 From the repository root, run `pnpm install`, then `pnpm dev:tamagotchi`.
 Run `pnpm -F @proj-airi/stage-tamagotchi build` to build the app.
 
+## Hybrid Cloudflare accounts
+
+The hybrid gateway reads `AIRI_KEYS_ENV`, including the existing SillyTavern `.env` file.
+The primary pair is `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_AI_API_TOKEN`.
+The optional fallback pair is `CLOUDFLARE_ACCOUNT_ID_2` and `CLOUDFLARE_AI_API_TOKEN_2`.
+Both fallback values are required. An AIRI `.env` override must supply the complete fallback pair.
+
+Cloudflare brain and vision requests retry on account 2 after an account quota or rate-limit rejection.
+The gateway shares quota cooldowns across Cloudflare roles. A daily allocation error keeps the account blocked until 00:00 UTC.
+Other rate limits use at least 60 seconds and honor `Retry-After`.
+Temporary model capacity errors retain the existing reasoning and local fallback policy.
+After the cooldown expires, the gateway tries the primary account first.
+Credentials stay in the gateway. Account changes retain the configured model and request budget.
+
+After a credential change, restart the hybrid gateway to load the new values.
+
 ## Stage controls
 
 Select **Expand** to access hearing controls, speech mute, and the development connection indicator.
