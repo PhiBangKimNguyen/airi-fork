@@ -7,10 +7,15 @@ VOICEVOX:冥鳴ひまり, VOICEVOX:春歌ナナ, VOICEVOX:猫使アル, VOICEVOX
 """
 
 import argparse
+import array
+import io
 import json
 import math
+import random
 import re
+import time
 import unicodedata
+import wave
 from collections import OrderedDict
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +25,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import kanalizer
+from voicevox_core import Note, Score
 from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile
 
 
@@ -593,6 +599,202 @@ def shape_shy_plan(syn, text, style, pitch_range):
     return q
 
 
+# Humming. Values come from the approved v4 transition preview, step 4.
+# The singing teacher 波音リツ (6000) plans pitch and timing only. 猫使ビィ おちつき (3059) is the voice.
+# Style 60 has no song style, so a hum uses 3059 for one clip. The next shy line returns to 60.
+HUM_TEACHER, HUM_STYLE, HUM_FPS = 6000, 3059, 93.75
+HUM_VOLUME, HUM_TRANSPOSE = 1.0, 0
+# One exact caption per motif. Only a whole chunk that equals a caption is sung.
+HUM_TEXTS = {"ん〜ん、ん〜ん〜♪": "lullaby"}
+HUM_MOTIFS = {
+    "lullaby": [(62, .35, "ん"), (64, .55, "ん"), (None, .12, ""), (67, .25, "ん"), (65, .25, "ん"), (64, 1.1, "ん")],
+}
+# The next shy line starts lower and rises. An inhale bridges the change from the song voice to the talk voice.
+HUM_EASE_IN, HUM_EASE_WINDOW = (1.6, 0.7), 20.0
+HUM_BRIDGE_BEFORE, HUM_INHALE, HUM_INHALE_LEVEL, HUM_BRIDGE_AFTER = 0.18, 0.26, 0.03, 0.05
+LOG_SEMITONE = math.log(2) / 12
+
+
+def hum_score(motif):
+    notes = [Note(round(0.15 * HUM_FPS), "")]
+    for key, seconds, lyric in HUM_MOTIFS[motif]:
+        notes.append(Note(max(1, round(seconds * HUM_FPS)), lyric, None if key is None else key + HUM_TRANSPOSE))
+    notes.append(Note(round(0.3 * HUM_FPS), ""))
+    return Score(notes)
+
+
+def moving_mean(values, radius):
+    return [sum(values[max(0, i - radius):i + radius + 1]) / len(values[max(0, i - radius):i + radius + 1]) for i in range(len(values))]
+
+
+def smooth_noise(rng, count, every, depth):
+    """A slow random curve: random points every few frames, joined with cosine interpolation."""
+    points = [rng.uniform(-depth, depth) for _ in range(count // every + 2)]
+    curve = []
+    for i in range(count):
+        a, t = divmod(i, every)
+        w = (1 - math.cos(math.pi * t / every)) / 2
+        curve.append(points[a] * (1 - w) + points[a + 1] * w)
+    return curve
+
+
+def hum_pitch(query, motif, rng):
+    """Builds pitch from the score and glides between notes. The teacher's dips around consonants are not used."""
+    keys = [k + HUM_TRANSPOSE for k, _, _ in HUM_MOTIFS[motif] if k is not None]
+    vowels = {"a", "i", "u", "e", "o", "N"}
+    target, owner, note, previous = [], [], -1, None
+    for phoneme in query.phonemes:
+        consonant_before = previous is not None and previous != "pau" and previous not in vowels
+        if phoneme.phoneme != "pau" and (phoneme.phoneme not in vowels or not consonant_before):
+            note += 1
+        key = keys[min(max(note, 0), len(keys) - 1)]
+        target += [key] * phoneme.frame_length
+        owner += [note if phoneme.phoneme != "pau" else -1] * phoneme.frame_length
+        previous = phoneme.phoneme
+    count = len(target)
+    semis = list(target)
+    # An 80 ms S-curve crosses each key change. Upward moves overshoot a little.
+    for i in range(1, count):
+        if target[i] != target[i - 1]:
+            span, start = 8, max(0, i - 3)
+            low, high = target[i - 1], target[i]
+            for j in range(span):
+                if start + j < count:
+                    w = (1 - math.cos(math.pi * (j + 1) / span)) / 2
+                    semis[start + j] = low * (1 - w) + high * w
+            if high > low:
+                for j in range(10):
+                    if start + span + j < count:
+                        semis[start + span + j] += 0.15 * (1 - j / 10)
+    # A note after silence starts slightly flat and rises into pitch.
+    for i in range(1, count):
+        if owner[i] >= 0 and owner[i - 1] == -1:
+            for j in range(7):
+                if i + j < count:
+                    semis[i + j] -= 0.45 * (1 - j / 7)
+    # Vibrato starts after about 0.25 s on a held note. Its rate and depth wander.
+    rate = smooth_noise(rng, count, 40, 0.5)
+    depth_wobble = smooth_noise(rng, count, 30, 0.06)
+    phase, steady = rng.uniform(0, math.tau), 0
+    for i in range(count):
+        steady = steady + 1 if owner[i] >= 0 and (i == 0 or target[i] == target[i - 1]) else 0
+        depth = (0.18 + depth_wobble[i]) * min(1.0, max(0.0, (steady - 24) / 30))
+        phase += math.tau * (5.0 + rate[i]) / HUM_FPS
+        semis[i] += depth * math.sin(phase)
+    drift = smooth_noise(rng, count, 45, 0.07)
+    semis = [s + d for s, d in zip(semis, drift)]
+    micro = smooth_noise(rng, count, 2, 0.035)
+    semis = [s + m for s, m in zip(semis, micro)]
+    query.f0 = [440 * 2 ** ((s - 69) / 12) for s in semis]
+
+
+def hum_volume(query, rng):
+    """A soft swell into each voiced run, a gentle sag on long notes, a long final fade, and small shimmer."""
+    volume = moving_mean(query.volume, 1)
+    runs, start = [], None
+    for i, v in enumerate(volume + [0.0]):
+        if v > 0.02 and start is None:
+            start = i
+        elif v <= 0.02 and start is not None:
+            runs.append((start, i))
+            start = None
+    for index, (a, b) in enumerate(runs):
+        length, last = b - a, index == len(runs) - 1
+        for i in range(a, b):
+            k = i - a
+            attack = min(1.0, k / 8) ** 1.5
+            sag = 1.0 - 0.18 * (k / max(1, length))
+            release = min(1.0, (b - i) / (30 if last else 8)) ** (2.0 if last else 1.0)
+            volume[i] *= attack * sag * release
+    wobble = smooth_noise(rng, len(volume), 3, 0.035)
+    query.volume = [v * (1 + w) for v, w in zip(volume, wobble)]
+
+
+def wav_samples(data):
+    with wave.open(io.BytesIO(data)) as clip:
+        params = clip.getparams()
+        samples = array.array("h", clip.readframes(clip.getnframes()))
+    return params, [s / 32768 for s in samples]
+
+
+def wav_bytes(params, samples):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as clip:
+        clip.setparams(params)
+        clip.writeframes(array.array("h", (max(-32767, min(32767, round(s * 32768))) for s in samples)).tobytes())
+    return buffer.getvalue()
+
+
+def lowpass(samples, rate, cutoff, q=0.707):
+    w = math.tau * cutoff / rate
+    alpha = math.sin(w) / (2 * q)
+    b0, b1, b2 = (1 - math.cos(w)) / 2, 1 - math.cos(w), (1 - math.cos(w)) / 2
+    a0, a1, a2 = 1 + alpha, -2 * math.cos(w), 1 - alpha
+    b0, b1, b2, a1, a2 = b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0
+    x1 = x2 = y1 = y2 = 0.0
+    result = []
+    for x in samples:
+        y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2, x1, y2, y1 = x1, x, y1, y
+        result.append(y)
+    return result
+
+
+def hum_finish(data, seed):
+    """Closed-mouth muffling, a faint inhale and air, then a small dark room. Each stage rounds to 16-bit like the preview."""
+    params, samples = wav_samples(data)
+    rate = params.framerate
+    params, samples = wav_samples(wav_bytes(params, lowpass(lowpass(samples, rate, 2200), rate, 3000)))
+    rng = random.Random(seed)
+    envelope, follow = [], 0.0
+    for s in samples:
+        follow = max(abs(s), follow * 0.9995)
+        envelope.append(follow)
+    noise = lowpass([rng.uniform(-1, 1) for _ in samples], rate, 3000)
+    inhale_len = int(0.28 * rate)
+    inhale = lowpass([rng.uniform(-1, 1) * math.sin(math.pi * i / inhale_len) ** 2 for i in range(inhale_len)], rate, 1800)
+    breathy = [0.012 * 2.2 * x for x in inhale] + [0.0] * int(0.08 * rate)         + [s + 0.012 * n * min(1.0, e / 0.25) for s, n, e in zip(samples, noise, envelope)]
+    params, dry = wav_samples(wav_bytes(params, breathy))
+    dry = dry + [0.0] * int(0.25 * rate)
+    taps = [(int(0.013 * rate), 0.5), (int(0.023 * rate), 0.35), (int(0.037 * rate), 0.25)]
+    early = [sum(g * dry[i - d] for d, g in taps if i >= d) for i in range(len(dry))]
+    delay, feedback, damp = int(0.031 * rate), 0.45, 0.4
+    comb, state = [0.0] * len(dry), 0.0
+    for i in range(len(dry)):
+        back = comb[i - delay] if i >= delay else 0.0
+        state = state * damp + back * (1 - damp)
+        comb[i] = dry[i] + feedback * state
+    wet = lowpass([e + 0.5 * (c - d) for e, c, d in zip(early, comb, dry)], rate, 2200)
+    return wav_bytes(params, [d + 0.14 * w for d, w in zip(dry, wet)])
+
+
+def render_hum(syn, motif, seed):
+    query = syn.create_sing_frame_audio_query(hum_score(motif), HUM_TEACHER)
+    query.volume_scale = HUM_VOLUME
+    rng = random.Random(seed)
+    hum_pitch(query, motif, rng)
+    hum_volume(query, random.Random(seed + 1))
+    return hum_finish(syn.frame_synthesis(query, HUM_STYLE), seed)
+
+
+def ease_after_hum(plan):
+    """The first two voiced morae after a hum start lower and rise into the normal contour."""
+    for mora, drop in zip(voiced(plan), HUM_EASE_IN):
+        mora.pitch -= drop * LOG_SEMITONE
+
+
+def inhale_bridge(speech, seed):
+    """Prepends a short gap and a soft inhale, so the talk voice does not start straight after the song voice."""
+    params, samples = wav_samples(speech)
+    rate = params.framerate
+    rng = random.Random(seed + 9)
+    count = int(HUM_INHALE * rate)
+    inhale = lowpass([rng.uniform(-1, 1) * math.sin(math.pi * i / count) ** 2 for i in range(count)], rate, 1600)
+    gap = [0.0] * int(HUM_BRIDGE_BEFORE * rate)
+    settle = [0.0] * int(HUM_BRIDGE_AFTER * rate)
+    return wav_bytes(params, gap + [HUM_INHALE_LEVEL * x for x in inhale] + settle + samples)
+
+
 class LocalVoicevox:
     def __init__(self, runtime):
         library = next((runtime / "onnxruntime").rglob("voicevox_onnxruntime.dll"))
@@ -604,15 +806,24 @@ class LocalVoicevox:
         for model_path in sorted((runtime / "models" / "vvms").glob("*.vvm")):
             with VoiceModelFile.open(model_path) as model:
                 self.synthesizer.load_voice_model(model)
+        # The song pack is optional. Without it, a hum caption is spoken like other text.
+        song_model = runtime / "models" / "song" / "s0.vvm"
+        self.can_hum = song_model.exists()
+        if self.can_hum:
+            with VoiceModelFile.open(song_model) as model:
+                self.synthesizer.load_voice_model(model)
         self.plans = OrderedDict()
+        self.bridged = set()
+        self.after_hum_until = 0.0
         self.variety = EndingVariety()
         self.foreign = ForeignReading(self.synthesizer.open_jtalk.analyze)
         # Overlapping browser connections share one lock for native synthesis, contour rotation, and cached plans.
         self.lock = RLock()
+        # Song and teacher styles are never offered as speaking voices.
         self.speakers = [
             {"name": character.name, "speaker_uuid": str(character.speaker_uuid),
-             "styles": [{"id": style.id, "name": style.name} for style in character.styles]}
-            for character in self.synthesizer.metas()
+             "styles": [{"id": style.id, "name": style.name} for style in character.styles if style.type == "talk"]}
+            for character in self.synthesizer.metas() if any(style.type == "talk" for style in character.styles)
         ]
         self.styles = {style["id"] for character in self.speakers for style in character["styles"]}
         # Every talk style gets its own pitch ceiling, so a new voice never runs uncalibrated.
@@ -627,6 +838,11 @@ class LocalVoicevox:
                 raise ValueError("Invalid prosody mode")
             if not 1 <= len(text) <= 8000:
                 raise ValueError("Invalid text length")
+            motif = HUM_TEXTS.get(text.strip())
+            if motif and self.can_hum and prosody == "j" and style in SHY_STYLES:
+                # The next shy line within the window eases in after this hum.
+                self.after_hum_until = time.monotonic() + HUM_EASE_WINDOW
+                return self.store_plan(style, (motif, random.randrange(1 << 30)), "hum", 1.0, 0.0, 1.0, 1.0)
             text, tone, focus = read_prosody(text)
             # Both modes and the shy profile plan the katakana reading of foreign words.
             text, focus = self.foreign.speakable(text), focus and self.foreign.speakable(focus)
@@ -638,19 +854,32 @@ class LocalVoicevox:
                 plan, _, _ = shape_plan(self.synthesizer, text, style, self.ranges[style], self.variety, tone, focus)
             else:
                 plan = self.synthesizer.create_audio_query(text, style)
-            plan_id = str(uuid4())
-            self.plans[plan_id] = (style, plan, prosody)
-            while len(self.plans) > 32:
-                self.plans.popitem(last=False)
-            return {"localPlanId": plan_id, "speedScale": plan.speed_scale,
-                    "pitchScale": plan.pitch_scale, "intonationScale": plan.intonation_scale,
-                    "volumeScale": plan.volume_scale}
+            bridged = prosody == "j" and style in SHY_STYLES and time.monotonic() < self.after_hum_until
+            if bridged:
+                ease_after_hum(plan)
+                self.after_hum_until = 0.0
+            body = self.store_plan(style, plan, prosody, plan.speed_scale, plan.pitch_scale, plan.intonation_scale, plan.volume_scale)
+            if bridged:
+                self.bridged.add(body["localPlanId"])
+            return body
+
+    def store_plan(self, style, plan, prosody, speed, pitch, intonation, volume):
+        plan_id = str(uuid4())
+        self.plans[plan_id] = (style, plan, prosody)
+        while len(self.plans) > 32:
+            expired, _ = self.plans.popitem(last=False)
+            self.bridged.discard(expired)
+        return {"localPlanId": plan_id, "speedScale": speed, "pitchScale": pitch,
+                "intonationScale": intonation, "volumeScale": volume}
 
     def synthesize(self, body, style):
         with self.lock:
             expected_style, plan, prosody = self.plans.pop(body["localPlanId"])
+            bridged = body["localPlanId"] in self.bridged
+            self.bridged.discard(body["localPlanId"])
             if expected_style != style:
                 raise ValueError("Voice does not match the plan")
+            controls = {}
             for field, attribute, lower, upper in [
                 ("speedScale", "speed_scale", 0.25, 4),
                 ("pitchScale", "pitch_scale", -0.15, 0.15),
@@ -660,9 +889,16 @@ class LocalVoicevox:
                 value = float(body[field])
                 if not math.isfinite(value) or not lower <= value <= upper:
                     raise ValueError("Invalid voice control")
+                controls[attribute] = value
+            if prosody == "hum":
+                # The approved hum fixes its own tempo, key, and loudness. Speech controls do not apply.
+                motif, seed = plan
+                return render_hum(self.synthesizer, motif, seed)
+            for attribute, value in controls.items():
                 setattr(plan, attribute, value)
             plan.validate()
-            return self.synthesizer.synthesis(plan, style, enable_interrogative_upspeak=prosody == "original")
+            wav = self.synthesizer.synthesis(plan, style, enable_interrogative_upspeak=prosody == "original")
+            return inhale_bridge(wav, random.randrange(1 << 30)) if bridged else wav
 
 
 class AiriVoicevoxHandler(BaseHTTPRequestHandler):

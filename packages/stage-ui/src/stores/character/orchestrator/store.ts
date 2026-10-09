@@ -13,7 +13,7 @@ import * as v from 'valibot'
 
 import { useCharacterNotebookStore, useCharacterStore } from '../'
 import { useAiriRuntimePrompt } from '../../../composables/use-airi-runtime-prompt'
-import { idleMusingInstruction, idleMusingKindSchema, IdleMusingSchedule } from '../../../libs/idle-musing'
+import { idleHumText, idleMusingInstruction, IdleMusingSchedule, spokenIdleMusingKindSchema } from '../../../libs/idle-musing'
 import { MediaAudioEars } from '../../../libs/media-audio'
 import { MediaReactionMemory } from '../../../libs/media-reaction-memory'
 import { parseMediaReaction } from '../../../libs/media-reaction-performance'
@@ -26,6 +26,7 @@ import { useChatStore } from '../../chat'
 import { useMediaWatchMemoryStore } from '../../media-watch-memory'
 import { useModsServerChannelStore } from '../../mods/api/channel-server'
 import { useConsciousnessStore } from '../../modules/consciousness'
+import { useSpeechStore } from '../../modules/speech'
 import { usePrivacyRoutingStore } from '../../privacy-routing'
 
 export { sparkNotifyCommandSchema } from '@proj-airi/core-agent/agents/spark-notify'
@@ -110,7 +111,9 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     updateAudioSharing()
   }, { flush: 'sync' })
 
-  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean }, signal?: AbortSignal) {
+  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean }, signal?: AbortSignal, opening = '') {
+    // An opening line, such as a hum, always comes before the model's first words.
+    let opened = !opening
     return createSparkNotifyAgent({
       runner: {
         run: request => stream(
@@ -138,13 +141,15 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       plugins: [
         createSparkNotifyReactionPlugin({
           onDelta: (eventId, text) => {
-            if (!media)
-              characterStore.onSparkNotifyReactionStreamEvent(eventId, text)
+            if (!media) {
+              characterStore.onSparkNotifyReactionStreamEvent(eventId, opened ? text : `${opening}${text}`)
+              opened = true
+            }
           },
           onEnd: (eventId, text) => {
             if (signal?.aborted)
               return
-            const reply = media ? parseMediaReaction(text) : { text }
+            const reply = media ? parseMediaReaction(text) : { text: opening && opened ? `${opening}${text}` : text }
             if (media) {
               if (media.scope === 'cloud' && !cloudVideoVision)
                 return
@@ -229,6 +234,14 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       console.info('Idle musing skipped', { eventId: event.data.id })
       return undefined
     }
+    // A standalone hum needs no model. It is sung only by the local 猫使ビィ shy voice.
+    if (idle && payload?.kind === 'hum') {
+      if (!humVoiceActive())
+        return undefined
+      characterStore.onSparkNotifyReactionStreamEvent(event.data.id, idleHumText)
+      characterStore.onSparkNotifyReactionStreamEnd(event.data.id, idleHumText)
+      return undefined
+    }
     // Media reactions expire rather than interrupt an active conversation or read stale content aloud.
     if (mediaReaction && payload) {
       if (!mediaSharingId || payload.sharingId !== mediaSharingId || payload.url !== mediaUrl
@@ -302,10 +315,12 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       }
       // Local musings can use private context. Their recent lines never reach a cloud request.
       const idleScope = localMode ? 'local' as const : 'cloud' as const
-      const idleText = idle ? idleMusingInstruction(v.parse(idleMusingKindSchema, payload?.kind), idleMusings.recentLines(idleScope)) : ''
+      const idleText = idle ? idleMusingInstruction(v.parse(spokenIdleMusingKindSchema, payload?.kind), idleMusings.recentLines(idleScope)) : ''
+      // The hum takes its own line, so speech chunking gives it a separate clip before the first sentence.
+      const idleOpening = idle && payload?.humOpening === true && humVoiceActive() ? `${idleHumText}\n` : ''
       if (idle)
         captured = privacy.capture({ sessionId: 'idle-musings', turnId: event.data.id, text: idleText, privateInput: false, ambient: false, historyExists: false })
-      const agent = media || idle ? createNotifyAgent(captured ? { conversationId: captured.sessionId, turnId: captured.turnId } : undefined, media, controller?.signal) : sparkNotifyAgent
+      const agent = media || idle ? createNotifyAgent(captured ? { conversationId: captured.sessionId, turnId: captured.turnId } : undefined, media, controller?.signal, idleOpening) : sparkNotifyAgent
       const result = await Promise.race([agent.handle({
         event: memoryHint ? { ...event, data: { ...event.data, note: 'React to this approved habit only.', payload: habitProvider ? { habit: memoryHint.shared } : { memoryHint: memoryHint.privateText } } } : idle ? { ...event, data: { ...event.data, note: idleText } } : event,
         selectedChat: {
@@ -417,6 +432,12 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     }
   }
 
+  /** The local speech server sings hums only in VOICEVOX style 60, 猫使ビィ 人見知り. */
+  function humVoiceActive() {
+    const speech = useSpeechStore()
+    return speech.activeSpeechProvider === 'voicevox' && speech.activeSpeechVoiceId === '60'
+  }
+
   function enqueueIdleMusing(now: number) {
     const id = `idle-${nanoid()}`
     enqueueSparkNotify({
@@ -429,7 +450,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         urgency: 'soon',
         headline: 'Idle musing',
         destinations: ['character'],
-        payload: { source: 'airi-idle-musing', kind: idleMusings.take(now) },
+        payload: { source: 'airi-idle-musing', ...idleMusings.take(now) },
       },
     }, { reason: 'idle:musing', nextRunAt: now, maxAttempts: 1 })
   }

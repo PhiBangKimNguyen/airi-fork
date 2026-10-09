@@ -149,6 +149,49 @@ class ProsodyTests(unittest.TestCase):
             self.assertEqual(plan.post_phoneme_length, post, line)
         self.assertNotEqual(self.moras(self.shy("ん。"))[0].pitch, 0)
 
+    def test_song_styles_are_not_speaking_voices(self):
+        for style in (voicevox.HUM_TEACHER, 3058, voicevox.HUM_STYLE):
+            self.assertNotIn(style, self.voice.styles)
+        self.assertIn(60, self.voice.styles)
+
+    def test_only_an_exact_hum_caption_in_the_shy_voice_is_sung(self):
+        caption = next(iter(voicevox.HUM_TEXTS))
+        try:
+            for text, style in ((caption + "ねえ", 60), (caption, 8)):
+                body = self.voice.create_plan(text, style)
+                self.assertEqual(self.voice.plans.pop(body["localPlanId"])[2], "j", text)
+        finally:
+            self.voice.after_hum_until = 0.0
+
+    def test_hum_sings_then_eases_the_next_shy_line_once(self):
+        if not self.voice.can_hum:
+            self.skipTest("The song pack is not installed.")
+        line = "ふう、静かだね。"
+        try:
+            self.voice.after_hum_until = 0.0
+            baseline = self.voice.create_plan(line, 60)
+            self.assertNotIn(baseline["localPlanId"], self.voice.bridged)
+            plain = [m.pitch for m in voicevox.voiced(self.voice.plans[baseline["localPlanId"]][1])]
+            hum = self.voice.create_plan(" " + next(iter(voicevox.HUM_TEXTS)) + chr(10), 60)
+            self.assertEqual(self.voice.plans[hum["localPlanId"]][2], "hum")
+            with wave.open(io.BytesIO(self.voice.synthesize(hum, 60))) as clip:
+                self.assertGreater(clip.getnframes() / clip.getframerate(), 3.0)
+            eased_body = self.voice.create_plan(line, 60)
+            eased = [m.pitch for m in voicevox.voiced(self.voice.plans[eased_body["localPlanId"]][1])]
+            for index, drop in enumerate(voicevox.HUM_EASE_IN):
+                self.assertAlmostEqual(plain[index] - eased[index], drop * voicevox.LOG_SEMITONE, places=6)
+            self.assertEqual(plain[2:], eased[2:])
+            with wave.open(io.BytesIO(self.voice.synthesize(baseline, 60))) as clip:
+                plain_seconds = clip.getnframes() / clip.getframerate()
+            with wave.open(io.BytesIO(self.voice.synthesize(eased_body, 60))) as clip:
+                bridged_seconds = clip.getnframes() / clip.getframerate()
+            bridge = voicevox.HUM_BRIDGE_BEFORE + voicevox.HUM_INHALE + voicevox.HUM_BRIDGE_AFTER
+            self.assertAlmostEqual(bridged_seconds - plain_seconds, bridge, places=2)
+            again = self.voice.create_plan(line, 60)
+            self.assertNotIn(again["localPlanId"], self.voice.bridged)
+        finally:
+            self.voice.after_hum_until = 0.0
+
     def test_shy_style_skips_teasing_rotation(self):
         self.voice.variety = voicevox.EndingVariety()
         body = self.voice.create_plan("[prosody tone=sassy focus=切り替え]その切り替えはずるくない？", 60)

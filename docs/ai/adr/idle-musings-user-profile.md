@@ -51,3 +51,13 @@ The prompt lists recent lines from the same scope and asks for a different topic
 
 A saved `Let AIRI muse when I am idle and not sharing a tab` control turns musings off.
 It starts enabled because the feature only speaks in an idle, unshared state.
+
+## Humming
+
+The rotation is an existential question, trivia, an existential thought, then a standalone hum.
+About three in ten spoken musings open with a hum on its own line.
+The chunker ends a Japanese chunk at a line break, so the hum is always a separate first clip.
+The model is told not to write humming, music notes, or ♪.
+A hum happens only while the speech provider is VOICEVOX with style 60.
+The hum caption stays Japanese. The English translation covers the spoken line only.
+`speech-prosody.md` describes how the local server sings the hum.

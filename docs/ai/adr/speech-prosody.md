@@ -272,8 +272,41 @@ Three new native tests cover these foreign word cases:
 Compare live speech with the J reel by listening.
 The focus rule operates at accent phrase boundaries, not inside one phrase.
 VOICEVOX Core 0.17 uses discrete mora pitches. A true pitch glide requires a separate approved engine or postprocessor.
-The style 60 hum fade stays synthetic for this reason. Core 0.17 accepts frame-level pitch only for sing styles, and 猫使ビィ has none.
+The style 60 hum fade stays synthetic for this reason. Core 0.17 accepts frame-level pitch only for sing styles. Style 60 has none.
+A sung hum uses 猫使ビィ おちつき (3059) from the song pack instead. See `Sung hum` below.
 Listen to the shy profile in live chat. The previews used fixed test lines.
 Restart the local speech server to load the foreign word rewrite.
 kanalizer misreads some words, for example cafe → ケーフ. OpenJTalk knows cafe, so café reads カフェ.
 The Cyrillic table has no stress or vowel reduction. A Russian stress dictionary needs a separate decision.
+
+## Sung hum
+
+The owner asked AIRI to hum softly at the start of an idle musing, or as a whole musing.
+A hum never comes in the middle or at the end of a sentence.
+
+The desktop pack `s0.vvm` has 猫使ビィ song styles ノーマル (3058) and おちつき (3059).
+The singing teacher 波音リツ (6000) plans pitch and timing only. 猫使ビィ is always the voice.
+The server loads the pack from `.local/voicevox/runtime/models/song/s0.vvm` when it exists.
+Song and teacher styles never appear in `/speakers`.
+
+Only a whole chunk that equals `ん〜ん、ん〜ん〜♪` in style 60 with J voicing becomes a hum plan.
+Any other text, and the same text in another style, is speech.
+The hum uses 3059 for that clip only. The next shy line returns to style 60.
+
+The owner approved step 4 of the v4 transition preview after three rounds.
+Raw song output sounded synthetic. The teacher gave flat held notes, pitch glitches near consonants, flat loudness, and a bright ん.
+The approved chain fixes them in this order:
+
+1. Pitch is rebuilt from the score keys. An 80 ms S-curve crosses each key change, with a small overshoot upward and a scoop after silence.
+2. Vibrato starts after about 0.25 s. Its rate and depth wander. Slow drift and micro jitter follow.
+3. Each voiced run swells in, sags a little, and the last run fades over about 0.3 s. Volume has small shimmer.
+4. Two low-pass filters at 2.2 kHz and 3 kHz muffle the hum like a closed mouth. A faint inhale and air follow its loudness.
+5. A small dark room adds three early reflections and a short damped tail.
+
+The hum key matches the lower shy speaking range. Shy lines sit near MIDI 66 to 67, start near 67 to 68, and end near 60 to 63.
+A shy line that follows a hum within 20 seconds eases in. Its first two voiced morae start 1.6 and 0.7 semitones lower.
+That line also starts with 0.18 s of silence, a 0.26 s inhale, and 0.05 s of silence.
+The ease and the inhale apply once.
+
+The teacher model gives a slightly different volume curve on each call. Each hum is a new take, like a human hum.
+With the same teacher draw and seed, the server output is byte-identical to the approved preview code.
