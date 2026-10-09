@@ -149,6 +149,21 @@ class ProsodyTests(unittest.TestCase):
             self.assertEqual(plan.post_phoneme_length, post, line)
         self.assertNotEqual(self.moras(self.shy("ん。"))[0].pitch, 0)
 
+    def test_short_call_opening_keeps_the_engine_voicing(self):
+        for text in ("ねえ、世界ってさ、誰もいないロビーみたいじゃない？", "ね、静かだね。"):
+            plan = self.shy(text)
+            engine = self.voice.synthesizer.create_audio_query(text, 60)
+            for m, e in zip(plan.accent_phrases[0].moras, engine.accent_phrases[0].moras):
+                self.assertEqual((m.pitch, m.vowel_length, m.consonant_length), (e.pitch, e.vowel_length, e.consonant_length), text)
+            self.assertEqual(plan.accent_phrases[0].pause_mora["vowel_length"], engine.accent_phrases[0].pause_mora["vowel_length"], text)
+            shaped = voicevox.shape_shy_sentence(self.voice.synthesizer, text, 60, self.voice.ranges[60])
+            self.assertEqual([m.pitch for m in voicevox.voiced(plan)][len(plan.accent_phrases[0].moras):],
+                             [m.pitch for m in voicevox.voiced(shaped)][len(shaped.accent_phrases[0].moras):], text)
+        for text in ("あの、静かだね。", "そ、そんなことない。"):
+            plan, shaped = self.shy(text), voicevox.shape_shy_sentence(self.voice.synthesizer, text, 60, self.voice.ranges[60])
+            self.assertEqual([m.vowel_length for m in plan.accent_phrases[0].moras], [m.vowel_length for m in shaped.accent_phrases[0].moras], text)
+            self.assertGreaterEqual(plan.accent_phrases[0].pause_mora["vowel_length"], voicevox.SHY_HESITATION, text)
+
     def test_song_styles_are_not_speaking_voices(self):
         for style in (voicevox.HUM_TEACHER, 3058, voicevox.HUM_STYLE):
             self.assertNotIn(style, self.voice.styles)

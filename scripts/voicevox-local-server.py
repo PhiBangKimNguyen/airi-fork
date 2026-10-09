@@ -57,6 +57,9 @@ SHY_EXCLAIM_INTONATION, SHY_EXCLAIM_LIFT, SHY_EXCLAIM_TRAIL, SHY_HELD_STRETCH = 
 SHY_PRE_PHONEME, SHY_POST_PHONEME, SHY_ELLIPSIS_POST = 0.12, 0.3, 0.45
 SHY_MEAN_BELOW_SOFT = 0.08
 SHY_HUM_LOWER, SHY_HUM_STRETCH = 0.1, 1.4
+# A short call opening, such as ねえ、 or ね、, keeps the engine voicing. Shy pitch and stretch made its held vowel drone.
+# The owner chose the engine opening over shorter and glided versions by listening against the official engine.
+SHY_OPENING_MAX_MORAS = 2
 # Moras of a filler accent phrase. A one-mora phrase before a pause is a stutter, as in そ、そんな.
 SHY_FILLERS = {"ア", "アノ", "アノー", "エ", "エー", "エット", "エト", "ソノ", "ウ", "ウーン", "ン", "ンー", "ンン"}
 SHY_BREAK_MIN_MORAS, SHY_BREAK_PARTICLES = 12, ("ワ", "ガ", "モ", "テ", "デ", "ド", "ラ", "ニ", "ト")
@@ -768,6 +771,23 @@ def shape_shy_hum(syn, style, trailing_ellipsis):
     return q
 
 
+def keep_engine_opening(syn, text, style, q):
+    """Restores the engine pitch, lengths, and pause of a short call opening. Fillers and stutters keep the shy hesitation."""
+    phrases = q.accent_phrases
+    if len(phrases) < 2 or phrases[0].pause_mora is None or len(phrases[0].moras) > SHY_OPENING_MAX_MORAS:
+        return q
+    kana = [m.text for m in phrases[0].moras]
+    if "".join(kana) in SHY_FILLERS or (len(kana) == 1 and phrases[1].moras and phrases[1].moras[0].text == kana[0]):
+        return q
+    engine = syn.create_audio_query(text, style).accent_phrases[0]
+    if [m.text for m in engine.moras] != kana or engine.pause_mora is None:
+        return q
+    for m, e in zip(phrases[0].moras, engine.moras):
+        m.pitch, m.vowel_length, m.consonant_length = e.pitch, e.vowel_length, e.consonant_length
+    phrases[0].pause_mora["vowel_length"] = engine.pause_mora["vowel_length"]
+    return q
+
+
 def shape_shy_plan(syn, text, style, pitch_range):
     """Shy voicing. Tone and focus tags are removed earlier and do not apply. The profile has no teasing contours."""
     # OpenJTalk drops 〜 and ～. A long vowel mark keeps the held vowel of ほんと〜？ and すごい〜！.
@@ -779,7 +799,7 @@ def shape_shy_plan(syn, text, style, pitch_range):
         return shape_shy_hum(syn, style, trailing_ellipsis)
     laugh = SHY_LAUGH.match(core)
     if not laugh:
-        return shape_shy_sentence(syn, text, style, pitch_range)
+        return keep_engine_opening(syn, text, style, shape_shy_sentence(syn, text, style, pitch_range))
     # Keep the laugh from the plan of its carrier sentence. The carrier itself is never spoken.
     q = shape_shy_sentence(syn, f"{core}、{SHY_LAUGH_CARRIERS[laugh[1]]}", style, pitch_range)
     cut = next((i for i, ph in enumerate(q.accent_phrases) if ph.pause_mora is not None), None)

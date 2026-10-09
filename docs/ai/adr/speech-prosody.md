@@ -84,6 +84,11 @@ The shy profile does these steps:
 7. It moves the whole sentence down when the sentence exceeds the style cap, or its mean exceeds the soft limit minus 0.08.
    A clamp on single morae flattened the question rise of ほんと〜？.
 8. A hum phrase inside a sentence, such as ん〜、, is 0.1 log-F0 lower and held 1.4 times longer.
+9. A short call opening keeps the engine pitch, lengths, and pause. It is a first phrase of one or two morae before a comma, such as ねえ、 or ね、.
+   Fillers such as あの、 and stutters such as そ、 keep the shy hesitation.
+   Steps 4 and 5 lowered and stretched the opening vowel to one flat pitch. The owner heard a synthetic drone.
+   The official VOICEVOX 0.25.2 engine plans these openings exactly like core 0.17, and its audio differs by at most 4 LSB.
+   The owner rejected a shorter vowel and glided vowel pieces, and chose the restored engine opening.
 
 The profile ignores tone and focus tags. It does not rotate ending contours.
 
