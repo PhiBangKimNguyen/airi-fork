@@ -47,6 +47,7 @@ const kindInstructions: Record<SpokenIdleMusingKind, string> = {
 export class IdleMusingSchedule {
   private dueAt: number
   private kindIndex = 0
+  private failedSlots = 0
   private readonly recent: Record<IdleMusingScope, string[]> = { local: [], cloud: [] }
 
   constructor(now: number, private readonly timing: IdleMusingTiming = defaultIdleMusingTiming, private readonly random: () => number = Math.random) {
@@ -62,12 +63,24 @@ export class IdleMusingSchedule {
     return now >= this.dueAt
   }
 
-  /** Returns the next kind, decides whether a spoken musing opens with a hum, and schedules the following musing. */
-  take(now: number): { kind: IdleMusingKind, humOpening: boolean } {
+  /** Reserves a short retry window. Only accepted speech advances the kind and long interval. */
+  take(now: number, hummingAvailable = true): { kind: IdleMusingKind, humOpening: boolean } {
+    if (!hummingAvailable && kinds[this.kindIndex % kinds.length] === 'hum')
+      this.kindIndex += 1
     const kind = kinds[this.kindIndex % kinds.length]
+    this.dueAt = now + Math.min(this.timing.minGapMs, 60_000 * 2 ** this.failedSlots)
+    this.failedSlots = Math.min(this.failedSlots + 1, 3)
+    return { kind, humOpening: kind !== 'hum' && this.random() < humOpeningChance }
+  }
+
+  complete(now: number) {
+    this.failedSlots = 0
     this.kindIndex += 1
     this.dueAt = now + this.timing.minGapMs + Math.floor(this.random() * (this.timing.maxGapMs - this.timing.minGapMs))
-    return { kind, humOpening: kind !== 'hum' && this.random() < humOpeningChance }
+  }
+
+  get nextAt() {
+    return this.dueAt
   }
 
   /** Keeps the English caption when present, because it is shorter than the bilingual reply. */

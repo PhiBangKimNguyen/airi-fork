@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { airiTimePeriodKey } from '../libs/media-vision'
 import { useMediaWatchMemoryStore } from './media-watch-memory'
@@ -23,5 +23,39 @@ describe('time-aware tease allowance', () => {
     expect(memory.canTimeTease(new Date('2026-10-08T22:00:00Z'))).toBe(true)
     expect(memory.canTimeTease(new Date('2026-10-09T06:00:00Z'))).toBe(true)
     memory.clear()
+  })
+})
+
+describe('collected music storage', () => {
+  it('persists evidence, stops learning when disabled, and forgets the playlist with history', () => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const memory = useMediaWatchMemoryStore()
+    const previousEnabled = memory.enabled
+    const item = { url: 'https://www.youtube.com/watch?v=storefixture', title: 'Artist - Song (Live)', isPlaying: true }
+    try {
+      memory.clear()
+      memory.enabled = true
+      memory.observe(item)
+      vi.advanceTimersByTime(30_000)
+      memory.observe(item)
+      memory.observeMusic(item.url, ['MUSIC: A folk arrangement.'])
+      expect(memory.playlist).toHaveLength(1)
+      expect(memory.musicPreferences.genres[0].name).toBe('folk')
+      memory.enabled = false
+      memory.observe({ ...item, url: 'https://www.youtube.com/watch?v=otherfixture' })
+      memory.observeMusic(item.url, ['MUSIC: jazz'])
+      expect(memory.playlist).toHaveLength(1)
+      expect(memory.musicPreferences.genres).toHaveLength(1)
+      expect(memory.takeHint(item.url)).toBeUndefined()
+      memory.clear()
+      expect(memory.playlist).toEqual([])
+      expect(memory.musicPreferences.genres).toEqual([])
+    }
+    finally {
+      memory.clear()
+      memory.enabled = previousEnabled
+      vi.useRealTimers()
+    }
   })
 })

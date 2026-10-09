@@ -58,6 +58,16 @@ describe('private co-watching session', () => {
 })
 
 describe('persistent private viewing memory', () => {
+  it('rejects a reported paraphrase after a restart and more than six intervening comments', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    memory.observe(video, start)
+    expect(memory.remember(video.url, 'Looks like a Russian song.')).toBe(true)
+    for (let index = 0; index < 10; index++)
+      expect(memory.remember(video.url, `Arrangement detail ${index}`)).toBe(true)
+    const restored = new MediaWatchMemory(memory.snapshot())
+    expect(restored.remember(video.url, 'Ah, this is a Russian song, right?')).toBe(false)
+    expect(restored.remember(video.url, 'That piano gives me old-radio nostalgia.')).toBe(true)
+  })
   it('remembers replay days, comments, and inferred favorites after a clean reload', () => {
     const memory = new MediaWatchMemory({ version: 1, videos: [] })
     memory.observe(video, start)
@@ -100,5 +110,96 @@ describe('persistent private viewing memory', () => {
     expect(memory.snapshot().videos.some(item => item.id === 'fixture0')).toBe(false)
     const empty = new MediaWatchMemory({ invalid: 'PRIVATE_UNTRUSTED_STORAGE' })
     expect(empty.preferences().favorites).toEqual([])
+  })
+})
+
+describe('collected song versions and genres', () => {
+  const song = { ...video, title: 'Artist - Летний дождь (Official Music Video)' }
+  const live = { ...video, url: 'https://www.youtube.com/watch?v=livefixture', title: 'Artist - ЛЕТНИЙ ДОЖДЬ (Live)' }
+
+  it('comments on a different upload of the same song after a reload', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    memory.observe(song, start)
+    memory.observe(song, start + 30_000)
+    memory.remember(song.url, 'That chorus again!')
+    const restarted = new MediaWatchMemory(memory.snapshot())
+    restarted.observe(live, start + 24 * 60 * 60_000)
+    expect(restarted.takeHint(live.url, start + 24 * 60 * 60_000)).toBeUndefined()
+    restarted.observe(live, start + 24 * 60 * 60_000 + 30_000)
+    const hint = restarted.takeHint(live.url, start + 24 * 60 * 60_000 + 30_000)
+    expect(hint?.privateText).toContain('PRIVATE song comparison')
+    expect(hint?.privateText).toContain(song.title)
+    expect(hint?.privateText).toContain(live.title)
+    expect(hint?.privateText).toContain('That chorus again!')
+    expect(hint?.shared).toBeUndefined()
+    expect(restarted.playlist()).toHaveLength(1)
+    expect(restarted.playlist()[0].versions).toHaveLength(2)
+    expect(restarted.playlist()[0].versions[0].url).toBe(live.url)
+    expect(restarted.remember(live.url, 'THAT CHORUS AGAIN!')).toBe(false)
+    expect(restarted.takeHint(live.url, start + 24 * 60 * 60_000 + 60_000)).toBeUndefined()
+    const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
+    const request = router.capture({ sessionId: 'song', turnId: 'comparison', text: hint!.privateText, privateInput: true, ambient: true, historyExists: false, mode: 'cloud' })
+    expect(request.lane).toBe('local')
+    expect(() => router.cloudConversation(request)).toThrow('Private requests')
+  })
+
+  it('matches bare historical titles when the current version supplies music evidence', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    memory.observe({ ...song, title: 'Летний дождь' }, start)
+    memory.observe({ ...song, title: 'Летний дождь' }, start + 30_000)
+    memory.observe(live, start + 60_000)
+    memory.observe(live, start + 90_000)
+    expect(memory.playlist()[0].versions).toHaveLength(2)
+    expect(memory.takeHint(live.url, start + 90_000)?.privateText).toContain('PRIVATE song comparison')
+  })
+
+  it('separates homonymous songs with different artists', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    memory.observe(song, start)
+    memory.observe(song, start + 30_000)
+    const other = { ...live, title: 'Different Artist - Летний дождь (Live)' }
+    memory.observe(other, start + 60_000)
+    memory.observe(other, start + 90_000)
+    expect(memory.playlist()).toHaveLength(2)
+    expect(memory.takeHint(other.url, start + 90_000)).toBeUndefined()
+    const unidentified = { ...video, url: 'https://www.youtube.com/watch?v=barefixture', title: 'Летний дождь (Acoustic)' }
+    memory.observe(unidentified, start + 120_000)
+    memory.observe(unidentified, start + 150_000)
+    expect(memory.playlist()).toHaveLength(3)
+    expect(memory.takeHint(unidentified.url, start + 150_000)).toBeUndefined()
+  })
+
+  it('aggregates engaged songs once per genre and persists their evidence', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    for (const [index, item] of [song, live, { ...video, url: 'https://www.youtube.com/watch?v=othersong1', title: 'Other Song' }, { ...video, url: 'https://www.youtube.com/watch?v=othersong2', title: 'Third Song' }].entries()) {
+      const now = start + index * 60_000
+      memory.observe(item, now)
+      memory.observe(item, now + 30_000)
+      memory.observeMusic(item.url, ['MUSIC: A jazz arrangement.'], now + 30_000)
+    }
+    const restarted = new MediaWatchMemory(memory.snapshot())
+    expect(restarted.playlist()).toHaveLength(3)
+    expect(restarted.musicPreferences().songs).toBe(3)
+    expect(restarted.musicPreferences().genres[0].songs).toBe(3)
+    expect(restarted.musicPreferences().genres[0].evidence).toContain('MUSIC: A jazz arrangement.')
+    const hint = restarted.takeHint('https://www.youtube.com/watch?v=othersong2', start + 210_000)
+    expect(hint?.privateText).toContain('PRIVATE listening preferences')
+    expect(hint?.privateText).toContain('jazz')
+    expect(hint?.shared).toBeUndefined()
+    expect(restarted.takeHint('https://www.youtube.com/watch?v=othersong1', start + 240_000)).toBeUndefined()
+  })
+
+  it('leaves unknown genres unclassified and rejects stale or unobserved audio', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    expect(memory.observeMusic(video.url, ['MUSIC: jazz'], start)).toBe(false)
+    memory.observe({ ...video, isPlaying: false }, start)
+    expect(memory.playlist()).toEqual([])
+    memory.observe(video, start)
+    expect(memory.observeMusic(video.url, ['SPEECH: rock'], start)).toBe(false)
+    expect(memory.observeMusic(video.url, ['MUSIC: jazz'], start + 46_000)).toBe(false)
+    memory.observe(video, start + 30_000)
+    expect(memory.observeMusic(video.url, ['MUSIC: Singing with a guitar.'], start + 30_000)).toBe(true)
+    expect(memory.musicPreferences().unknownGenreSongs).toBe(1)
+    expect(memory.musicPreferences().genres).toEqual([])
   })
 })

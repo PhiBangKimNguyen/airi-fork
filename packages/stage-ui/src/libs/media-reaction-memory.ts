@@ -17,6 +17,16 @@ export function normalizeMediaReply(value: string) {
   return (translation ?? clean).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 }
 
+const subjectFillers = new Set('a an the this that is are it its looks like sounds feels ah oh whoa huh right so you your we they really just song music track lyrics lyric singing sing sung about all over'.split(' '))
+
+/** Rejects exact replies and lexical paraphrases. Different details remain separate subjects. */
+export function repeatsMediaReply(text: string, previous: string[]) {
+  const normalized = normalizeMediaReply(text)
+  const subject = (value: string) => [...new Set(normalizeMediaReply(value).split(' ').filter(word => !subjectFillers.has(word)).map(word => word.replace(/^brothers$/, 'brother').replace(/^sisters$/, 'sister')))].sort().join(' ')
+  const candidate = subject(text)
+  return previous.some(reply => normalizeMediaReply(reply) === normalized || (!!candidate && subject(reply) === candidate))
+}
+
 /** Extracts a grammatical ending without retaining or forwarding the rest of the Japanese reply. */
 function sentenceEnding(value: string) {
   const japanese = speechCaption(value).split('(')[0].normalize('NFKC').replace(/[\p{P}\sー]+$/gu, '')
@@ -73,9 +83,9 @@ export class MediaReactionMemory {
   remember(scope: 'local' | 'cloud', sharingId: string, url: string, text: string) {
     const normalized = normalizeMediaReply(text)
     const recent = this.recent(scope, sharingId, url)
-    if (!normalized || recent.some(previous => normalizeMediaReply(previous) === normalized))
+    if (!normalized || repeatsMediaReply(text, recent))
       return false
-    this.comments.set(JSON.stringify([scope, sharingId, url]), [...recent, text.slice(0, 1000)].slice(-6))
+    this.comments.set(JSON.stringify([scope, sharingId, url]), [...recent, text.slice(0, 1000)].slice(-32))
     return true
   }
 

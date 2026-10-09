@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MediaWatchPlaylist from '@proj-airi/stage-ui/components/scenarios/media-watch-playlist'
+
 import { useMediaWatchMemoryStore } from '@proj-airi/stage-ui/stores/media-watch-memory'
 import { usePrivacyRoutingStore } from '@proj-airi/stage-ui/stores/privacy-routing'
 import { useUserProfileStore } from '@proj-airi/stage-ui/stores/user-profile'
@@ -77,6 +79,7 @@ const providers = [
           {{ favorite.title }} — {{ t('stage.hybrid.watch-memory-days', { count: favorite.days }) }}
         </li>
       </ul>
+      <MediaWatchPlaylist :playlist="memory.playlist" :preferences="memory.musicPreferences" />
       <GhostButton :class="['self-start px-2 py-1']" @click="memory.clear()">
         {{ t('stage.hybrid.watch-memory-forget') }}
       </GhostButton>

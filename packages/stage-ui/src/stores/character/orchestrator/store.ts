@@ -19,7 +19,7 @@ import { MediaReactionMemory } from '../../../libs/media-reaction-memory'
 import { parseMediaReaction } from '../../../libs/media-reaction-performance'
 import { airiTimeOfDay, airiTimePeriodKey, habitReactionPersonality, MediaAttention, mediaReactionPersonality, parseSharedVideo } from '../../../libs/media-vision'
 import { cloudProviderSchema, hybridEnabled } from '../../../libs/privacy-routing'
-import { SensoryEventGate } from '../../../libs/sensory-context'
+import { corroboratedLyrics, SensoryEventGate, unsupportedLyricClaim } from '../../../libs/sensory-context'
 import { useLLM } from '../../ai/chat-llm/llm'
 import { useSpeakingStore } from '../../audio'
 import { useChatStore } from '../../chat'
@@ -42,6 +42,8 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
   const modsServerChannelStore = useModsServerChannelStore()
 
   const processing = ref(false)
+  const idleDiagnostics = ref({ blockers: [] as string[], nextAt: 0 })
+  let processingIdle = false
   const pendingNotifies = ref<Array<WebSocketEventOf<'spark:notify'>>>([])
 
   const scheduledNotifies = ref<Array<{
@@ -65,6 +67,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
   let initialized = false
   let mediaController: AbortController | undefined
   let mediaSharingId = ''
+  let sharingLastSeen = 0
   let mediaSharingSessionId = ''
   let publicSharingUrl = ''
   let mediaUrl = ''
@@ -82,6 +85,20 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
   let localVideoVision = false
   let inklingResearchMedia = false
   const eventUnsubscribes: Array<() => void> = []
+
+  function revokeSharing(reason: string) {
+    mediaController?.abort(new Error(reason))
+    mediaSharingId = ''
+    mediaSharingSessionId = ''
+    mediaUrl = ''
+    publicSharingUrl = ''
+    eventGate.clear()
+    mediaMemory.clear()
+    mediaAttention.clear()
+    updatePublicSharing()
+    updateAudioSharing()
+    console.info('Media sharing revoked', { reason })
+  }
   function updatePublicSharing() {
     privacyStore.router.setPublicSharing(cloudVideoVision && privacyStore.mode !== 'local'
       ? {
@@ -111,7 +128,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     updateAudioSharing()
   }, { flush: 'sync' })
 
-  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean }, signal?: AbortSignal, opening = '') {
+  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '') {
     // An opening line, such as a hum, always comes before the model's first words.
     let opened = !opening
     return createSparkNotifyAgent({
@@ -151,6 +168,10 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
               return
             const reply = media ? parseMediaReaction(text) : { text: opening && opened ? `${opening}${text}` : text }
             if (media) {
+              if (unsupportedLyricClaim(reply.text, media.lyricsAvailable === true)) {
+                console.info('Media reaction skipped', { eventId, reason: 'uncorroborated-lyric-claim' })
+                return
+              }
               if (media.scope === 'cloud' && !cloudVideoVision)
                 return
               if (media.habitProvider && (!watchMemory.enabled || watchMemory.habitProvider !== media.habitProvider))
@@ -240,6 +261,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         return undefined
       characterStore.onSparkNotifyReactionStreamEvent(event.data.id, idleHumText)
       characterStore.onSparkNotifyReactionStreamEnd(event.data.id, idleHumText)
+      idleMusings.complete(Date.now())
       return undefined
     }
     // Media reactions expire rather than interrupt an active conversation or read stale content aloud.
@@ -261,6 +283,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     }
 
     processing.value = true
+    processingIdle = idle
     const controller = mediaReaction || idle ? new AbortController() : undefined
     if (controller)
       mediaController = controller
@@ -279,8 +302,10 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       const provider = await Promise.race([consciousnessStore.getChatProviderInstance(providerId), deadline])
       const privacy = usePrivacyRoutingStore()
       // Full history stays local. The cloud teaser receives approved counts or current music with a coarse period.
-      const memoryHint = hybridEnabled && mediaReaction ? watchMemory.takeHint(mediaUrl) : undefined
       const audioObservations = ears?.recent()
+      if (hybridEnabled && mediaReaction && audioObservations?.length)
+        watchMemory.observeMusic(mediaUrl, audioObservations)
+      const memoryHint = hybridEnabled && mediaReaction ? watchMemory.takeHint(mediaUrl) : undefined
       const now = new Date()
       const localMode = privacy.mode === 'local'
       const cloudTeaser = !localMode && (watchMemory.habitProvider === 'brain' || watchMemory.habitProvider === 'gemini' || watchMemory.habitProvider === 'kimi') ? watchMemory.habitProvider : undefined
@@ -288,7 +313,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         && ears?.readyForTimeTease(now.getTime()) === true && now.getTime() - lastTimedTeaseAt >= 180_000
       if (timeAware)
         lastTimedTeaseAt = now.getTime()
-      const habitProvider = (memoryHint || timeAware) && cloudVideo && cloudVideoVision ? cloudTeaser : undefined
+      const habitProvider = (memoryHint?.shared || timeAware) && cloudVideo && cloudVideoVision ? cloudTeaser : undefined
       // A late or failed audio request cannot silently turn listening together into visual-only commentary.
       if (cloudVideo && !localMode && !memoryHint && audioEarsEnabled && !audioObservations?.length) {
         console.info('Media reaction skipped', { eventId: event.data.id, reason: 'no-fresh-audio' })
@@ -296,7 +321,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       }
       const scope = !localMode && cloudVideo && (!memoryHint || habitProvider) ? 'cloud' as const : 'local' as const
       const hints = mediaMemory.hints(scope)
-      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint } : undefined
+      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint, lyricsAvailable: scope === 'cloud' && corroboratedLyrics(audioObservations ?? [], typeof payload?.text === 'string' ? payload.text : '').length > 0 } : undefined
       const sharedMedia = cloudVideo && !memoryHint
         ? parseSharedVideo({ ...payload, modeHint: hints.modeHint, reactionSound: hints.reactionSound, timeOfDay: timeAware ? airiTimeOfDay(now) : undefined, audioObservations, audioPriority: audioEarsEnabled, researchMedia: inklingResearchMedia })
         : undefined
@@ -308,7 +333,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       else if (sharedMedia) {
         captured = localMode
           ? privacy.router.capturePrivateMedia(event.data.id, { ...sharedMedia, audioObservations: undefined, audioPriority: false })
-          : privacy.router.captureMedia(event.data.id, { ...sharedMedia, attention: mediaAttention.resolve(sharedMedia.frames, ears?.kind() ?? 'unknown') }, timeAware ? habitProvider : undefined, { sharingId: mediaSharingId, url: mediaUrl, recentWords: hints.recentWords, recentEndings: hints.recentEndings }, privacy.selectedProvider === 'brain' ? 'brain' : cloudVideoProvider)
+          : privacy.router.captureMedia(event.data.id, { ...sharedMedia, attention: mediaAttention.resolve(sharedMedia.frames, ears?.kind() ?? 'unknown') }, timeAware ? habitProvider : undefined, { sharingId: mediaSharingId, url: mediaUrl, recentWords: hints.recentWords, recentEndings: hints.recentEndings, recentComments: mediaMemory.recent(scope, mediaSharingId, mediaUrl).slice(-8) }, privacy.selectedProvider === 'brain' ? 'brain' : cloudVideoProvider)
       }
       else if (privateVideo) {
         captured = privacy.router.capturePrivateMedia(event.data.id, { ...payload, modeHint: hints.modeHint, reactionSound: hints.reactionSound })
@@ -334,8 +359,10 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       }), deadline])
       if (idle && !controller?.signal.aborted) {
         const musing = [...characterStore.reactions].reverse().find(item => item.sourceEventId === event.data.id)?.message
-        if (musing)
+        if (musing?.trim()) {
           idleMusings.remember(idleScope, musing)
+          idleMusings.complete(Date.now())
+        }
       }
       if (!result.commands.length)
         return result
@@ -357,6 +384,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       if (controller === mediaController)
         mediaController = undefined
       processing.value = false
+      processingIdle = false
       console.info('Spark reaction ended', { eventId: event.data.id, aborted: controller?.signal.aborted ?? false })
     }
   }
@@ -450,21 +478,35 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         urgency: 'soon',
         headline: 'Idle musing',
         destinations: ['character'],
-        payload: { source: 'airi-idle-musing', ...idleMusings.take(now) },
+        payload: { source: 'airi-idle-musing', ...idleMusings.take(now, humVoiceActive()) },
       },
     }, { reason: 'idle:musing', nextRunAt: now, maxAttempts: 1 })
   }
 
   async function tick() {
     const now = Date.now()
+    // Sharing heartbeats arrive every ten seconds. A 45-second lease tolerates delayed delivery and bounds stale sharing.
+    if (mediaSharingId && now - sharingLastSeen >= 45_000)
+      revokeSharing('sharing-heartbeat-expired')
     const expired = scheduledNotifies.value.filter(item => item.reason === 'media:observed' && typeof item.event.data.payload?.expiresAt === 'number' && item.event.data.payload.expiresAt <= now)
     for (const item of expired)
       removePending(item.event.data.id)
     scheduledNotifies.value = scheduledNotifies.value.filter(item => !expired.includes(item))
-    if (!hybridEnabled || !privacyStore.idleMusings || processing.value || mediaSharingId || scheduledNotifies.value.length
-      || useChatStore().activeTurns.length > 0 || useSpeakingStore().nowSpeaking) {
+    const blockers = [
+      !hybridEnabled && 'hybrid-disabled',
+      !privacyStore.idleMusings && 'idle-disabled',
+      processing.value && !processingIdle && 'reaction-processing',
+      !!mediaSharingId && 'tab-shared',
+      scheduledNotifies.value.some(item => item.reason !== 'idle:musing') && 'notification-pending',
+      useChatStore().activeTurns.length > 0 && 'chat-active',
+      !!useSpeakingStore().nowSpeaking && 'speaking',
+    ].filter((reason): reason is string => !!reason)
+    if (JSON.stringify(blockers) !== JSON.stringify(idleDiagnostics.value.blockers))
+      console.info('Idle musing blockers changed', { blockers })
+    if (blockers.length) {
       idleMusings.busy(now)
     }
+    idleDiagnostics.value = { blockers, nextAt: idleMusings.nextAt }
     if (processing.value)
       return
 
@@ -541,9 +583,15 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
 
     initialized = true
 
+    eventUnsubscribes.push(watch(() => modsServerChannelStore.connected, (connected) => {
+      if (!connected && mediaSharingId)
+        revokeSharing('server-channel-disconnected')
+    }, { flush: 'sync' }))
+
     eventUnsubscribes.push(modsServerChannelStore.onContextUpdate((event) => {
       if (event.data.metadata?.source !== 'web-extension')
         return
+      sharingLastSeen = Date.now()
       if (event.data.lane === 'web:sharing') {
         const nextSharingId = typeof event.data.metadata.sharingId === 'string' ? event.data.metadata.sharingId : ''
         const nextSessionId = typeof event.data.metadata.sharingSessionId === 'string' ? event.data.metadata.sharingSessionId : ''
@@ -626,12 +674,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
   }
 
   function dispose() {
-    eventGate.clear()
-    mediaController?.abort(new Error('Media orchestrator disposed.'))
-    ears?.setSharing('', '', false)
-    mediaAttention.clear()
-    mediaMemory.clear()
-    privacyStore.router.setPublicSharing()
+    revokeSharing('orchestrator-disposed')
     stopTicker()
 
     for (const unsubscribe of eventUnsubscribes) {
@@ -644,6 +687,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
 
   return {
     processing,
+    idleDiagnostics,
     pendingNotifies,
     scheduledNotifies,
     attentionConfig,

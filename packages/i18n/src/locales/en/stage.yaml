@@ -232,3 +232,28 @@ hybrid:
   watch-time-shared: Uses Indochina Time (UTC+7) and fresh audio from the shared public video. Only the broad time period reaches the model.
   watch-memory-days: 'seen on {count} days'
   watch-memory-forget: Forget viewing history
+  music-playlist: Collected music playlist
+  music-playlist-scope: Groups candidate songs across live, cover, and video versions. Song comparisons and genre commentary use local memory.
+  music-playlist-empty: Share a playing YouTube song to start this playlist. Audio ears can identify music without version labels.
+  music-versions: '{count} version | {count} versions'
+  music-genres: Observed genres
+  music-genres-empty: No genre evidence yet. AIRI uses explicit genre labels in music titles or audio observations.
+  music-genre-songs: '{count} song | {count} songs'
+  music-genres-unknown: '{count} song has no genre evidence yet. | {count} songs have no genre evidence yet.'
+  music-genre-labels:
+    rock: Rock
+    pop: Pop
+    jazz: Jazz
+    blues: Blues
+    classical: Classical
+    electronic: Electronic
+    folk: Folk
+    metal: Metal
+    hip-hop: Hip-hop
+    rnb: Rhythm and blues
+    country: Country
+    reggae: Reggae
+    soul: Soul
+    ambient: Ambient
+    synthwave: Synthwave
+    soundtrack: Soundtrack

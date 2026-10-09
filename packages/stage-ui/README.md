@@ -2,6 +2,17 @@
 
 Shared core for stage
 
+## Collected music memory
+
+`MediaWatchMemory` stores explicitly shared YouTube playback in the local profile, with a limit of 200 videos.
+`MediaWatchPlaylist` shows candidate songs, links to watched versions, and genre evidence under the desktop's local viewing memory controls.
+Song identity uses Unicode title matching. Version labels remain available for commentary.
+Explicit artist conflicts prevent homonymous songs from merging. Declared adaptations can use different performers.
+Genre summaries count engaged songs once per genre. Title and audio evidence supply tentative labels, and absent evidence stays unknown.
+Song comparisons and genre commentary route locally. They never enter the approved cloud habit projection.
+Use this memory for shared playback habits. It does not fingerprint audio or import a YouTube account playlist.
+Disable viewing memory to stop collection. Forget viewing history to delete songs, genre evidence, and remembered comments.
+
 ## Video reaction motions
 
 Video and viewing-habit replies choose an emotion cue with their spoken reaction.

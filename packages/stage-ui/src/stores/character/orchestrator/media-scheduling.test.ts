@@ -19,6 +19,132 @@ import { useCharacterOrchestratorStore } from './store'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: ref('en'), t: (key: string) => key, te: () => true }) }))
 
 describe('media notification scheduling', () => {
+  it.runIf(hybridEnabled)('retries a silent idle slot before the long success interval', async () => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const channel = useModsServerChannelStore()
+    vi.spyOn(channel, 'onContextUpdate').mockImplementation(() => () => {})
+    vi.spyOn(channel, 'onEvent').mockImplementation(() => () => {})
+    const privacy = usePrivacyRoutingStore()
+    const previousEnabled = privacy.idleMusings
+    const previousMode = privacy.mode
+    const consciousness = useConsciousnessStore()
+    consciousness.activeProvider = 'hybrid-kimi'
+    consciousness.activeModel = 'airi-kimi'
+    vi.spyOn(consciousness, 'getChatProviderInstance').mockResolvedValue({ generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'http://127.0.0.1:18420/kimi/v1/' } }) })
+    const stream = vi.spyOn(useLLM(), 'stream').mockResolvedValue(undefined)
+    const store = useCharacterOrchestratorStore()
+    try {
+      privacy.idleMusings = true
+      privacy.mode = 'cloud'
+      store.initialize()
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(stream).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(stream).toHaveBeenCalledTimes(2)
+    }
+    finally {
+      store.dispose()
+      privacy.idleMusings = previousEnabled
+      privacy.mode = previousMode
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
+
+  it.runIf(hybridEnabled)('expires a sharing grant after heartbeat loss and clears it on channel disconnect', async () => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const channel = useModsServerChannelStore()
+    let publish: Parameters<typeof channel.onContextUpdate>[0] | undefined
+    vi.spyOn(channel, 'onContextUpdate').mockImplementation((callback) => {
+      publish = callback
+      return () => {}
+    })
+    vi.spyOn(channel, 'onEvent').mockImplementation(() => () => {})
+    const store = useCharacterOrchestratorStore()
+    const share = () => publish?.({ type: 'context:update', metadata: { source: { kind: 'plugin', plugin: { id: 'fixture' }, id: 'fixture' }, event: { id: 'sharing' } }, data: { id: 'sharing', contextId: 'sharing', lane: 'web:sharing', text: '', strategy: ContextUpdateStrategy.ReplaceSelf, metadata: { source: 'web-extension', sharingId: 'share', sharingSessionId: 'grant', url: 'https://www.youtube.com/watch?v=fixture', cloudVideoVision: true } } })
+    try {
+      store.initialize()
+      share()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(store.idleDiagnostics.blockers).toContain('tab-shared')
+      await vi.advanceTimersByTimeAsync(44_000)
+      expect(store.idleDiagnostics.blockers).not.toContain('tab-shared')
+      channel.connected = true
+      share()
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(store.idleDiagnostics.blockers).toContain('tab-shared')
+      channel.connected = false
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(store.idleDiagnostics.blockers).not.toContain('tab-shared')
+    }
+    finally {
+      store.dispose()
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
+
+  it.runIf(hybridEnabled)('keeps song comparisons local when a cloud habit provider is selected', async () => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const channel = useModsServerChannelStore()
+    let publish: Parameters<typeof channel.onContextUpdate>[0] | undefined
+    vi.spyOn(channel, 'onContextUpdate').mockImplementation((callback) => {
+      publish = callback
+      return () => {}
+    })
+    vi.spyOn(channel, 'onEvent').mockImplementation(() => () => {})
+    const memory = useMediaWatchMemoryStore()
+    const previousEnabled = memory.enabled
+    const previousHabitProvider = memory.habitProvider
+    const privacy = usePrivacyRoutingStore()
+    const previousMode = privacy.mode
+    const consciousness = useConsciousnessStore()
+    consciousness.activeProvider = 'hybrid-kimi'
+    consciousness.activeModel = 'airi-kimi'
+    vi.spyOn(consciousness, 'getChatProviderInstance').mockResolvedValue({ generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'http://127.0.0.1:18420/kimi/v1/' } }) })
+    const capture = vi.spyOn(privacy, 'capture')
+    const cloudCapture = vi.spyOn(privacy.router, 'captureWatchHabit')
+    const stream = vi.spyOn(useLLM(), 'stream').mockResolvedValue(undefined)
+    const store = useCharacterOrchestratorStore()
+    const original = { url: 'https://www.youtube.com/watch?v=songfixture', title: 'Artist - Летний дождь (Official Video)', isPlaying: true }
+    const live = { ...original, url: 'https://www.youtube.com/watch?v=livefixture', title: 'Artist - Летний дождь (Live)' }
+    const context = (lane: string, metadata: Record<string, unknown>) => publish?.({ type: 'context:update', metadata: { source: { kind: 'plugin', plugin: { id: 'fixture' }, id: 'fixture' }, event: { id: lane } }, data: { id: lane, contextId: lane, lane, text: '', strategy: ContextUpdateStrategy.ReplaceSelf, metadata: { source: 'web-extension', ...metadata } } })
+    try {
+      memory.clear()
+      memory.enabled = true
+      memory.habitProvider = 'gemini'
+      privacy.mode = 'cloud'
+      memory.observe(original)
+      vi.advanceTimersByTime(30_000)
+      memory.observe(original)
+      store.initialize()
+      context('web:sharing', { sharingId: 'song-share', sharingSessionId: 'grant', url: live.url, cloudVideoVision: true })
+      context('web:page', { url: live.url })
+      context('web:video', live)
+      vi.advanceTimersByTime(30_000)
+      context('web:video', live)
+      await store.handleSparkNotify({ type: 'spark:notify', source: 'fixture', data: { id: 'song-comparison', eventId: 'song-comparison', kind: 'ping', urgency: 'soon', headline: 'Shared media', destinations: ['character'], payload: { source: 'web-extension-cloud-video', sharingId: 'song-share', url: live.url, title: live.title, expiresAt: Date.now() + 30_000, frames: ['data:image/jpeg;base64,YWJj'] } } })
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(stream).toHaveBeenCalledOnce()
+      expect(capture).toHaveBeenCalledOnce()
+      expect(capture.mock.results[0].value.lane).toBe('local')
+      expect(capture.mock.calls[0][0].text).toContain('PRIVATE song comparison')
+      expect(cloudCapture).not.toHaveBeenCalled()
+    }
+    finally {
+      store.dispose()
+      memory.clear()
+      memory.enabled = previousEnabled
+      memory.habitProvider = previousHabitProvider
+      privacy.mode = previousMode
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
+
   it.runIf(hybridEnabled).each([
     { chat: 'kimi', video: 'gemini', publishPage: true },
     { chat: 'brain', video: 'brain', publishPage: true },

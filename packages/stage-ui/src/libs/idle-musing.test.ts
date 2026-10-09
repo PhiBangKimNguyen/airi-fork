@@ -5,6 +5,11 @@ import { idleHumText, idleMusingInstruction, IdleMusingSchedule } from './idle-m
 const timing = { quietMs: 100, minGapMs: 1000, maxGapMs: 2000 }
 
 describe('idle musing schedule', () => {
+  it('does not consume the long interval before a musing succeeds', () => {
+    const schedule = new IdleMusingSchedule(0, timing, () => 0.99)
+    schedule.take(100)
+    expect(schedule.due(1100)).toBe(true)
+  })
   it('waits for quiet time and restarts the wait after activity', () => {
     const schedule = new IdleMusingSchedule(0, timing)
     expect(schedule.due(99)).toBe(false)
@@ -17,23 +22,30 @@ describe('idle musing schedule', () => {
   it('rotates kinds and waits a random gap between musings', () => {
     const schedule = new IdleMusingSchedule(0, timing, () => 0.5)
     expect(schedule.take(100).kind).toBe('existential-question')
+    schedule.complete(100)
     expect(schedule.due(1599)).toBe(false)
     expect(schedule.due(1600)).toBe(true)
     // Activity during a long gap does not shorten the gap.
     schedule.busy(1000)
     expect(schedule.due(1600)).toBe(true)
     expect(schedule.take(1600).kind).toBe('trivia')
+    schedule.complete(1600)
     expect(schedule.take(3100).kind).toBe('existential-thought')
+    schedule.complete(3100)
     expect(schedule.take(4600).kind).toBe('hum')
+    schedule.complete(4600)
     expect(schedule.take(6100).kind).toBe('existential-question')
   })
 
   it('opens some spoken musings with a hum, and never adds a hum to a standalone hum', () => {
-    const draws = [0, 0.1, 0, 0.9, 0, 0.1, 0, 0.1]
+    const draws = [0.1, 0, 0.9, 0, 0.1, 0, 0]
     const schedule = new IdleMusingSchedule(0, timing, () => draws.shift() ?? 0)
     expect(schedule.take(0)).toEqual({ kind: 'existential-question', humOpening: true })
+    schedule.complete(0)
     expect(schedule.take(0)).toEqual({ kind: 'trivia', humOpening: false })
+    schedule.complete(0)
     expect(schedule.take(0)).toEqual({ kind: 'existential-thought', humOpening: true })
+    schedule.complete(0)
     expect(schedule.take(0)).toEqual({ kind: 'hum', humOpening: false })
   })
 

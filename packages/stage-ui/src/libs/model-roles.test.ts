@@ -26,9 +26,12 @@ afterEach(() => vi.restoreAllMocks())
 describe('model roles', () => {
   it('renders bilingual fields through the existing speech format and preserves expression markers', async () => {
     const marker = '<|ACT {"emotion":{"name":"happy","intensity":1}}|>'
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply({ action: 'speak', text: `${marker}猫だね。`, translation: 'A cat.' }))
+    const transport = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply({ action: 'speak', text: `${marker}猫だね。`, translation: 'A cat.' }))
     const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
     expect(result.text).toBe(`${marker}猫だね。\n\n(A cat.)`)
+    const body = JSON.parse(String(transport.mock.calls[0]?.[1]?.body))
+    expect(body.messages[0].content).toContain('existential lines retain restrained poetry')
+    expect(body.messages[0].content).toContain('Final field rule: text is Japanese dialogue')
   })
 
   it('uses only GLM for ordinary dialogue and retains the character prompt', async () => {

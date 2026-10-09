@@ -380,7 +380,7 @@ describe('hybrid gateway', () => {
     const gateway = await listen(createGateway(profile, token, undefined, undefined, true, true))
     const response = await send(gateway, body)
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ observation: 'Synthetic tones change rhythm.', auditory: { kind: 'unknown', summary: 'Synthetic tones change rhythm.' } })
+    expect(await response.json()).toEqual({ observation: 'Synthetic tones change rhythm.', auditory: { kind: 'unknown', summary: 'Synthetic tones change rhythm.', lyricEvidence: { source: 'audio-model', confidence: 'unavailable' } } })
     expect(received.mock.calls[0][0].model).toBe(model)
     expect(JSON.stringify(received.mock.calls[0][0])).not.toContain('PRIVATE_HISTORY')
     expect(received.mock.calls[0][0].messages[1].content[1].type).toBe('input_audio')
@@ -521,6 +521,7 @@ describe('hybrid gateway', () => {
     expect(received.mock.calls[0][0].messages[0].content).toContain('English translation enclosed in ASCII parentheses')
     expect(received.mock.calls[0][0].messages[0].content).toContain('one or two short spoken sentences')
     expect(received.mock.calls[0][0].messages[0].content).toContain('Translate intent, attitude, and rhythm, not words.')
+    expect(received.mock.calls[0][0].messages[0].content).toContain('existential lines retain restrained poetry')
   })
 
   it('blocks tools, images, and tool history before a cloud request', async () => {

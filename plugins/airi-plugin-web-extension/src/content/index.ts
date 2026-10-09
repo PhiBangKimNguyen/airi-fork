@@ -1,14 +1,28 @@
 import type { BackgroundToContentMessage, ContentToBackgroundMessage, PageContextPayload, SubtitlePayload, VideoContextPayload, VideoSite, VisionFramePayload } from '../shared/types'
 
 import { detectSiteFromUrl, extractVideoId, normalizeText } from '../shared/sites'
+import { YoutubeMetadataGate } from './youtube-metadata'
 
 const VIDEO_PROGRESS_INTERVAL = 15000
 const TITLE_POLL_INTERVAL = 2000
 const SUBTITLE_DEDUPE_WINDOW = 2000
 
 const lastPayloadByType = new Map<string, string>()
+let youtubeMetadata = new YoutubeMetadataGate()
+
+function metadataReady(site: VideoSite) {
+  return site !== 'youtube' || youtubeMetadata.ready({
+    url: location.href,
+    renderedId: document.querySelector('ytd-watch-flexy')?.getAttribute('video-id'),
+    canonicalUrl: document.querySelector('link[rel="canonical"]')?.getAttribute('href'),
+    title: normalizeText(findVideoTitle(site)),
+    documentTitle: document.title,
+  }, Date.now())
+}
 
 function safeSend(message: ContentToBackgroundMessage) {
+  if ('payload' in message && message.payload.site === 'youtube' && !metadataReady('youtube'))
+    return
   const serialized = JSON.stringify('payload' in message ? message.payload : null)
   const lastSerialized = lastPayloadByType.get(message.type)
   if (serialized === lastSerialized)
@@ -29,7 +43,7 @@ function buildPageContext(site: VideoSite): PageContextPayload {
     // YouTube keeps the previous video's meta description during playlist navigation. Omit that unverified field.
     description: site === 'youtube' ? undefined : description || ogDescription || undefined,
     language: document.documentElement.lang || undefined,
-    visibleText: readVisibleText(),
+    visibleText: site === 'youtube' ? undefined : readVisibleText(),
   }
 }
 
@@ -112,9 +126,9 @@ function findVideoTitle(site: VideoSite) {
 function findChannelName(site: VideoSite) {
   if (site === 'youtube') {
     return (
-      document.querySelector('#channel-name a')?.textContent
-      || document.querySelector('ytd-channel-name a')?.textContent
-      || document.querySelector('ytd-channel-name')?.textContent
+      document.querySelector('ytd-watch-flexy #owner #channel-name a')?.textContent
+      || document.querySelector('ytd-watch-flexy #owner ytd-channel-name a')?.textContent
+      || document.querySelector('ytd-watch-flexy #owner ytd-channel-name')?.textContent
     )
   }
 
@@ -224,6 +238,8 @@ function observeSubtitleDom(site: VideoSite, onSubtitle: (payload: SubtitlePaylo
 }
 
 function captureVisionFrame(site: VideoSite, video: HTMLVideoElement): VisionFramePayload | null {
+  if (!metadataReady(site))
+    return null
   const canvas = document.createElement('canvas')
   const width = Math.min(480, Math.max(1, Math.floor(video.videoWidth)))
   const height = Math.min(270, Math.max(1, Math.floor(video.videoHeight)))
@@ -355,6 +371,7 @@ function observeVideo(site: VideoSite) {
 
 export function startContentObserver() {
   lastPayloadByType.clear()
+  youtubeMetadata = new YoutubeMetadataGate()
   const site = detectSiteFromUrl(location.href)
   safeSend({ type: 'content:page', payload: buildPageContext(site) })
   const stopVideo = observeVideo(site)

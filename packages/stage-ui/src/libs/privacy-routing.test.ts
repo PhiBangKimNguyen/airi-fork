@@ -9,6 +9,27 @@ function setup() {
 }
 
 describe('privacy routing', () => {
+  it('withholds uncorroborated music lyrics while preserving acoustic evidence', () => {
+    const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
+    const request = router.captureMedia('lyrics', { title: 'Song', text: 'brother and sister', audioObservations: ['MUSIC: INSTRUMENTS: piano. WORDS: brother and sister. WORDS_CONFIDENCE: uncertain.'], frames: ['data:image/jpeg;base64,YWJj'] })
+    const prompt = JSON.stringify(router.mediaConversation(request))
+    expect(prompt).not.toContain('brother and sister')
+    expect(prompt).toContain('piano')
+    expect(prompt).toContain('acoustic opinion')
+  })
+
+  it('includes only current authorized cloud comments and drops them after revocation', () => {
+    const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
+    const url = 'https://www.youtube.com/watch?v=fixture'
+    const owner = { sharingId: 'share', url, recentWords: [], recentEndings: [], recentComments: ['PUBLIC_REACTION'] }
+    router.setPublicSharing({ sessionId: 'grant', sharingId: 'share', url, continuity: false, chat: true })
+    expect(JSON.stringify(router.mediaConversation(router.captureMedia('no-consent', { frames: ['data:image/jpeg;base64,YWJj'] }, undefined, owner)))).not.toContain('PUBLIC_REACTION')
+    router.setPublicSharing({ sessionId: 'grant', sharingId: 'share', url, continuity: true, chat: true })
+    const request = router.captureMedia('approved', { frames: ['data:image/jpeg;base64,YWJj'] }, undefined, owner)
+    expect(JSON.stringify(router.mediaConversation(request))).toContain('PUBLIC_REACTION')
+    router.setPublicSharing()
+    expect(JSON.stringify(router.mediaConversation(request))).not.toContain('PUBLIC_REACTION')
+  })
   it('uses the configured public brain character without sharing private context', () => {
     const router = new PrivacyRouter({ provider: 'brain', sessions: {}, cloudHistory: {} }, 'PUBLIC_CONFIGURED_CHARACTER')
     const request = router.capture({ sessionId: 'public', turnId: 'turn', text: 'Hello.', privateInput: false, ambient: false, historyExists: false })

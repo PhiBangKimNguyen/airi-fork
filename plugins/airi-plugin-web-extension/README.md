@@ -49,6 +49,17 @@ Protected or cross-origin players can block frame capture. Revoked reactions can
 Following keeps the same tab audio stream. Each video gets a new sharing ID and a worklet generation reset, so old context cannot follow it.
 Other tabs never inherit sharing. Disable the follow control to stop sharing on every URL change.
 The desktop remembers explicitly shared YouTube playback across restarts in its local profile. Inferred preferences and full history stay local.
+The collected music playlist groups candidate songs by normalized title and retains links to each watched version.
+Live, cover, adaptation, and music-video labels describe versions. Explicit artist conflicts prevent matches unless a version declares an adaptation.
+After 30 seconds of observed playback, AIRI can comment on another version of a previously watched song.
+Title matches are tentative. They do not establish differences in sound or lyrics.
+Audio ears mark music and supply genre evidence. Version labels can also identify candidate music titles.
+Genre summaries count each engaged song once. Repeated uploads do not increase the genre count.
+After three engaged songs, AIRI can comment on genres with explicit title or audio evidence.
+Unknown genres remain unknown. Language and channel names never establish a genre.
+Song comparisons and genre commentary use Qwen locally, including when a cloud habit provider is selected.
+Open **Collected music playlist** under **Local viewing memory** to inspect songs, versions, and observed genres.
+**Forget viewing history** also deletes the collected playlist and genre evidence.
 Under **Local viewing memory**, **Who teases you?** selects Qwen, Gemini, or Kimi.
 Cloud teasing shares only approved replay, return, or channel engagement counts for an explicitly shared public video.
 The time-aware switch adds fresh public audio and a broad period based on Indochina Time (UTC+7).

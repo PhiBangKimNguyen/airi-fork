@@ -4,6 +4,12 @@ import { MediaReactionMemory } from './media-reaction-memory'
 import { PrivacyRouter } from './privacy-routing'
 
 describe('media reaction memory', () => {
+  it('rejects the reported language paraphrase while preserving a fresh arrangement opinion', () => {
+    const memory = new MediaReactionMemory()
+    expect(memory.remember('cloud', 'share', 'video', 'Looks like a Russian song.')).toBe(true)
+    expect(memory.remember('cloud', 'share', 'video', 'Ah, this is a Russian song, right?')).toBe(false)
+    expect(memory.remember('cloud', 'share', 'video', 'That Russian chorus with the piano gives me old-radio nostalgia.')).toBe(true)
+  })
   it('accepts a third repeated Japanese ending and hints the ending in the next prompt', () => {
     const memory = new MediaReactionMemory()
     memory.setSession('grant')
@@ -68,9 +74,9 @@ describe('media reaction memory', () => {
     const memory = new MediaReactionMemory()
     expect(memory.remember('cloud', 'share', 'video', '  ')).toBe(false)
     expect(memory.remember('cloud', 'share', 'video', '[prosody tone=plain focus=]')).toBe(false)
-    for (let i = 0; i < 10; i++)
+    for (let i = 0; i < 40; i++)
       memory.remember('cloud', 'share', 'video', `Comment ${i}`)
-    expect(memory.recent('cloud', 'share', 'video')).toHaveLength(6)
+    expect(memory.recent('cloud', 'share', 'video')).toHaveLength(32)
     expect(memory.recent('cloud', 'share', 'video')).not.toContain('Comment 0')
   })
 })

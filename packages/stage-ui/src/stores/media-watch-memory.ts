@@ -20,6 +20,8 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
     return new MediaWatchMemory(JSON.parse(JSON.stringify(state.value)))
   }
   const preferences = computed(() => memory().preferences())
+  const playlist = computed(() => memory().playlist())
+  const musicPreferences = computed(() => memory().musicPreferences())
   function observe(input: unknown) {
     if (!enabled.value) {
       session.clear()
@@ -45,6 +47,13 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
       state.value = current.snapshot()
     }
     return hint
+  }
+  function observeMusic(url: string, observations: readonly string[]) {
+    if (!enabled.value)
+      return
+    const current = memory()
+    if (current.observeMusic(url, observations))
+      state.value = current.snapshot()
   }
   function recent(url: string) {
     return enabled.value ? memory().recent(url) : []
@@ -73,5 +82,5 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
     timeTeasePeriods.value = [...timeTeasePeriods.value, period].slice(-10)
     return true
   }
-  return { enabled, habitProvider, timeAwareTeasing, preferences, observe, takeHint, recent, remember, canTimeTease, rememberTimeTease, clear }
+  return { enabled, habitProvider, timeAwareTeasing, preferences, playlist, musicPreferences, observe, observeMusic, takeHint, recent, remember, canTimeTease, rememberTimeTease, clear }
 })
