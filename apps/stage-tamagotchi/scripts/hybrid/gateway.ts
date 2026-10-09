@@ -409,8 +409,9 @@ export function createGateway(profiles: Record<string, GatewayProfile>, token: s
           : `The user speaks English and does not understand Japanese. Reply in exactly two blocks: a casual Japanese reply first, then a blank line and its English translation enclosed in ASCII parentheses (like this). ${replyLength} ${bilingualStyle} Reserve ASCII opening parentheses for the English translation. Use fullwidth parentheses for Japanese notes. Keep code, URLs, and technical identifiers unchanged.`
         if (route[1] === 'brain' && replyLanguage === 'ja-en')
           languageRule = `The user speaks English. Inside the JSON, text contains casual Japanese dialogue. translation contains its English translation. ${replyLength} ${bilingualStyle} English never belongs inside text. Use fullwidth parentheses for Japanese notes. Keep technical identifiers unchanged.`
+        languageRule += ' Do not use 「ねえ、」 in Japanese dialogue. Begin directly with the rest of the sentence.'
         const localLanguageRule = profile.private && replyLanguage === 'ja-en'
-          ? ' Speak Japanese in the first paragraph. Use only Japanese script except technical names. Do not write empty parentheses. Example format: ねえ、この猫かわいすぎない？\n\n(Hey, isn\'t this cat way too cute?)'
+          ? ' Speak Japanese in the first paragraph. Use only Japanese script except technical names. Do not write empty parentheses. Example format: この猫かわいすぎない？\n\n(Hey, isn\'t this cat way too cute?)'
           : ''
         const prosodyRule = mediaRoute && replyLanguage === 'ja-en'
           ? ' Prefix each Japanese sentence with [prosody tone=KIND focus=WORD]. Use sassy for teasing, curious for questions, cheeky for playful statements, or plain. WORD is an exact Japanese substring to emphasize, at most 20 characters. Leave WORD empty when no emphasis is needed. Put punctuation after the sentence, never inside the tag. The tag controls local speech only. Do not put tags in the English translation. Return empty text for silence.'
