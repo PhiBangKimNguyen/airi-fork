@@ -1,6 +1,7 @@
 import type { SparkNotifyResponseControl } from '@proj-airi/core-agent/agents/spark-notify'
 import type { WebSocketBaseEvent, WebSocketEventOf, WebSocketEvents } from '@proj-airi/server-sdk'
 
+import type { WatchHint } from '../../../libs/media-watch-memory'
 import type { RoutedRequest } from '../../../libs/privacy-routing'
 import type { CloudProvider } from '../../../types/cloud-provider'
 
@@ -128,7 +129,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     updateAudioSharing()
   }, { flush: 'sync' })
 
-  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '') {
+  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, hint?: WatchHint, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '') {
     // An opening line, such as a hum, always comes before the model's first words.
     let opened = !opening
     return createSparkNotifyAgent({
@@ -178,6 +179,8 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
                 return
               if (media.timeAware && !watchMemory.timeAwareTeasing)
                 return
+              if (media.hint && !watchMemory.enabled)
+                return
               // Buffer a media reply until it can be checked. Revoked or repeated comments never reach TTS.
               if (media.sharingId !== mediaSharingId || media.url !== mediaUrl || !mediaMemory.remember(media.scope, media.sharingId, media.url, reply.text))
                 return
@@ -187,6 +190,8 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
                 return
               mediaMemory.rememberStyle(media.scope, reply.text, media.habit)
               characterStore.onSparkNotifyReactionStreamEvent(eventId, reply.text, { emotion: reply.emotion })
+              if (media.hint)
+                watchMemory.completeHint(media.url, media.hint)
             }
             characterStore.onSparkNotifyReactionStreamEnd(eventId, reply.text)
           },
@@ -289,6 +294,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       mediaController = controller
     let timer: ReturnType<typeof setTimeout> | undefined
     let captured: RoutedRequest | undefined
+    let offeredHint: { url: string, hint: WatchHint } | undefined
     const deadline = new Promise<never>((_resolve, reject) => {
       if (!controller)
         return
@@ -306,6 +312,8 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       if (hybridEnabled && mediaReaction && audioObservations?.length)
         watchMemory.observeMusic(mediaUrl, audioObservations)
       const memoryHint = hybridEnabled && mediaReaction ? watchMemory.takeHint(mediaUrl) : undefined
+      if (memoryHint)
+        offeredHint = { url: mediaUrl, hint: memoryHint }
       const now = new Date()
       const localMode = privacy.mode === 'local'
       const cloudTeaser = !localMode && (watchMemory.habitProvider === 'brain' || watchMemory.habitProvider === 'gemini' || watchMemory.habitProvider === 'kimi') ? watchMemory.habitProvider : undefined
@@ -320,8 +328,12 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         return undefined
       }
       const scope = !localMode && cloudVideo && (!memoryHint || habitProvider) ? 'cloud' as const : 'local' as const
+      if (scope === 'local' && memoryHint && controller) {
+        clearTimeout(timer)
+        timer = setTimeout(() => controller.abort(new Error('Spark reaction deadline exceeded.')), 45_000)
+      }
       const hints = mediaMemory.hints(scope)
-      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint, lyricsAvailable: scope === 'cloud' && corroboratedLyrics(audioObservations ?? [], typeof payload?.text === 'string' ? payload.text : '').length > 0 } : undefined
+      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint, hint: memoryHint, lyricsAvailable: scope === 'cloud' && corroboratedLyrics(audioObservations ?? [], typeof payload?.text === 'string' ? payload.text : '').length > 0 } : undefined
       const sharedMedia = cloudVideo && !memoryHint
         ? parseSharedVideo({ ...payload, modeHint: hints.modeHint, reactionSound: hints.reactionSound, timeOfDay: timeAware ? airiTimeOfDay(now) : undefined, audioObservations, audioPriority: audioEarsEnabled, researchMedia: inklingResearchMedia })
         : undefined
@@ -377,6 +389,8 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       return result
     }
     finally {
+      if (offeredHint)
+        watchMemory.releaseHint(offeredHint.url, offeredHint.hint)
       if (timer)
         clearTimeout(timer)
       if (captured)
@@ -393,6 +407,9 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     if (event.data.payload?.source === 'web-extension-audio') {
       // Ears only produce observations. They never open speech intents or run the personality agent independently.
       await ears?.observe(event.data.payload)
+      const observations = ears?.recent()
+      if (hybridEnabled && observations?.length)
+        watchMemory.observeMusic(mediaUrl, observations)
       return undefined
     }
     if (hybridEnabled && !eventGate.accept(event.data.payload ? { ...event.data.payload, audioObservations: ears?.recent() } : undefined))

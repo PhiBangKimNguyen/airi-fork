@@ -86,6 +86,21 @@ try {
             throw "The local Ollama server failed to start with '$airiOllamaLauncher': $($_.Exception.Message)"
         }
     }
+    if ($airiSettings.LOCAL_QWEN_BASE_URL -eq 'http://127.0.0.1:11434/v1/') {
+        $airiModels = Invoke-RestMethod 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5
+        if (!$airiSettings.LOCAL_QWEN_MODEL -or $airiSettings.LOCAL_QWEN_MODEL -notin $airiModels.models.name) {
+            throw 'The configured LOCAL_QWEN_MODEL is absent. Select an installed model or run scripts/setup-hybrid.ps1.'
+        }
+        Write-Output 'Prepare the local commentary model before AIRI starts.'
+        $airiWarmBody = @{
+            model = $airiSettings.LOCAL_QWEN_MODEL
+            stream = $false
+            think = $false
+            keep_alive = '30m'
+        } | ConvertTo-Json
+        $airiWarmResult = Invoke-RestMethod -Method Post 'http://127.0.0.1:11434/api/generate' -ContentType 'application/json' -Body $airiWarmBody -TimeoutSec 180
+        if (!$airiWarmResult.done) { throw 'The local commentary model did not become ready.' }
+    }
     $airiReady = $false
     for ($airiAttempt = 0; $airiAttempt -lt 30; $airiAttempt++) {
         if ($airiGateway.HasExited) {

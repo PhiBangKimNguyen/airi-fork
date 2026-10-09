@@ -27,6 +27,45 @@ describe('time-aware tease allowance', () => {
 })
 
 describe('collected music storage', () => {
+  it('prioritizes the playlist and retries unsuccessful output without losing new observations', () => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const memory = useMediaWatchMemoryStore()
+    const previousEnabled = memory.enabled
+    const item = { url: 'https://www.youtube.com/watch?v=playlist2', title: 'Artist - Song 2 (Live)', channel: 'Shared channel', isPlaying: true }
+    try {
+      memory.clear()
+      memory.enabled = true
+      for (let index = 0; index < 3; index++) {
+        const song = { ...item, url: `https://www.youtube.com/watch?v=playlist${index}`, title: `Artist - Song ${index} (Live)` }
+        memory.observe(song)
+        vi.advanceTimersByTime(30_000)
+        memory.observe(song)
+      }
+      const failed = memory.takeHint(item.url)
+      expect(failed?.kind).toBe('playlist')
+      expect(memory.takeHint(item.url)).toBeUndefined()
+      memory.releaseHint(item.url, failed!)
+      vi.advanceTimersByTime(30_000)
+      memory.observe(item)
+      const retried = memory.takeHint(item.url)
+      expect(retried?.kind).toBe('playlist')
+      memory.observeMusic(item.url, ['MUSIC: GENRE: jazz.'])
+      memory.completeHint(item.url, retried!)
+      expect(memory.musicPreferences.genres[0].name).toBe('jazz')
+      expect(memory.takeHint(item.url)).toBeUndefined()
+      const restored = useMediaWatchMemoryStore(createPinia())
+      vi.advanceTimersByTime(120_000)
+      restored.observe(item)
+      expect(restored.takeHint(item.url)).toBeUndefined()
+    }
+    finally {
+      memory.clear()
+      memory.enabled = previousEnabled
+      vi.useRealTimers()
+    }
+  })
+
   it('persists evidence, stops learning when disabled, and forgets the playlist with history', () => {
     vi.useFakeTimers()
     setActivePinia(createPinia())

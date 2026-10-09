@@ -15,6 +15,7 @@ describe('private co-watching session', () => {
     const hint = session.takeHint(video.url, start + 105_000)
     expect(hint?.privateText).toContain('"playsThisSession":2')
     expect(hint?.privateText).toContain('PRIVATE_FAVORITE_VIDEO')
+    session.completeHint(video.url, hint!, start + 105_000)
     expect(session.takeHint(video.url, start + 120_000)).toBeUndefined()
     const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
     const request = router.capture({ sessionId: 'private-session', turnId: 'replay', text: hint!.privateText, privateInput: true, ambient: true, historyExists: false, mode: 'cloud' })
@@ -53,6 +54,7 @@ describe('private co-watching session', () => {
     const hint = session.takeHint('https://www.youtube.com/watch?v=fixture2', start + 150_000)
     expect(hint?.privateText).toContain('"engagedVideosFromChannel":3')
     expect(hint?.privateText).toContain('tentative')
+    session.completeHint('https://www.youtube.com/watch?v=fixture2', hint!, start + 150_000)
     expect(session.takeHint('https://www.youtube.com/watch?v=fixture2', start + 160_000)).toBeUndefined()
   })
 })
@@ -82,6 +84,7 @@ describe('persistent private viewing memory', () => {
     expect(hint?.privateText).toContain('This again?')
     expect(restarted.preferences().favorites[0].days).toBe(2)
     expect(restarted.snapshot().videos[0].watchSeconds).toBe(15)
+    restarted.completeHint(video.url, hint!, start + 24 * 60 * 60_000)
     expect(restarted.takeHint(video.url, start + 24 * 60 * 60_000 + 45_000)).toBeUndefined()
     expect(restarted.remember(video.url, 'また？ (THIS AGAIN!)')).toBe(false)
   })
@@ -136,6 +139,7 @@ describe('collected song versions and genres', () => {
     expect(restarted.playlist()[0].versions).toHaveLength(2)
     expect(restarted.playlist()[0].versions[0].url).toBe(live.url)
     expect(restarted.remember(live.url, 'THAT CHORUS AGAIN!')).toBe(false)
+    restarted.completeHint(live.url, hint!, start + 24 * 60 * 60_000 + 30_000)
     expect(restarted.takeHint(live.url, start + 24 * 60 * 60_000 + 60_000)).toBeUndefined()
     const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
     const request = router.capture({ sessionId: 'song', turnId: 'comparison', text: hint!.privateText, privateInput: true, ambient: true, historyExists: false, mode: 'cloud' })
@@ -166,7 +170,8 @@ describe('collected song versions and genres', () => {
     memory.observe(unidentified, start + 120_000)
     memory.observe(unidentified, start + 150_000)
     expect(memory.playlist()).toHaveLength(3)
-    expect(memory.takeHint(unidentified.url, start + 150_000)).toBeUndefined()
+    expect(memory.takeHint(unidentified.url, start + 150_000)?.kind).toBe('playlist')
+    expect(memory.takeHint(unidentified.url, start + 150_000)?.privateText).not.toContain('PRIVATE song comparison')
   })
 
   it('aggregates engaged songs once per genre and persists their evidence', () => {
@@ -186,6 +191,7 @@ describe('collected song versions and genres', () => {
     expect(hint?.privateText).toContain('PRIVATE listening preferences')
     expect(hint?.privateText).toContain('jazz')
     expect(hint?.shared).toBeUndefined()
+    restarted.completeHint('https://www.youtube.com/watch?v=othersong2', hint!, start + 210_000)
     expect(restarted.takeHint('https://www.youtube.com/watch?v=othersong1', start + 240_000)).toBeUndefined()
   })
 
@@ -201,5 +207,39 @@ describe('collected song versions and genres', () => {
     expect(memory.observeMusic(video.url, ['MUSIC: Singing with a guitar.'], start + 30_000)).toBe(true)
     expect(memory.musicPreferences().unknownGenreSongs).toBe(1)
     expect(memory.musicPreferences().genres).toEqual([])
+  })
+
+  it('offers a playlist remark with unknown genres and keeps failed attempts available', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    for (let index = 0; index < 3; index++) {
+      const item = { ...video, url: `https://www.youtube.com/watch?v=unknown${index}`, title: `Artist - Song ${index} (Live)` }
+      memory.observe(item, start + index * 60_000)
+      memory.observe(item, start + index * 60_000 + 30_000)
+    }
+    const url = 'https://www.youtube.com/watch?v=unknown2'
+    const hint = memory.takeHint(url, start + 150_000)
+    expect(hint?.kind).toBe('playlist')
+    expect(hint?.privateText).toContain('Song 0')
+    expect(hint?.privateText).toContain('"unknownGenreSongs":3')
+    expect(memory.musicPreferences().artists).toEqual([{ name: 'artist', songs: 3 }])
+    expect(hint?.shared).toBeUndefined()
+    expect(new MediaWatchMemory(memory.snapshot()).takeHint(url, start + 160_000)?.kind).toBe('playlist')
+    memory.completeHint(url, hint!, start + 160_000)
+    expect(new MediaWatchMemory(memory.snapshot()).takeHint(url, start + 170_000)).toBeUndefined()
+    memory.observe({ ...video, url, title: 'Artist - Song 2 (Live)' }, start + 760_000)
+    expect(new MediaWatchMemory(memory.snapshot()).takeHint(url, start + 760_000)?.kind).toBe('playlist')
+  })
+
+  it('does not let an accepted version comparison consume the playlist allowance', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    const items = [song, { ...video, url: 'https://www.youtube.com/watch?v=secondmusic', title: 'Other - Second Song (Live)' }, { ...video, url: 'https://www.youtube.com/watch?v=thirdmusic', title: 'Other - Third Song (Live)' }, live]
+    for (const [index, item] of items.entries()) {
+      memory.observe(item, start + index * 60_000)
+      memory.observe(item, start + index * 60_000 + 30_000)
+    }
+    const hint = memory.takeHint(live.url, start + 210_000)
+    expect(hint?.kind).toBe('version')
+    memory.completeHint(live.url, hint!, start + 210_000)
+    expect(memory.takeHint(live.url, start + 220_000)?.kind).toBe('playlist')
   })
 })

@@ -29,6 +29,18 @@ Each engaged candidate song counts once per genre.
 Unknown genres remain unknown.
 Song comparison and genre commentary use local inference.
 
+Playlist remarks use song titles, versions, channels, and listening counts, even when genre labels remain unknown.
+Fresh audio observations update the playlist before commentary selection.
+Audio perception requests an explicit tentative genre and returns unknown when audible evidence is insufficient.
+Persistent song and playlist hints take priority over session replay and channel hints.
+Playlist remarks have an independent ten-minute cooldown. Version and return remarks retain their per-video twelve-hour cooldown.
+Hint selection reserves an attempt in RAM. Only accepted output starts the persistent cooldown.
+Silence, rejection, timeout, cancellation, and inference failure release the reservation for a later attempt.
+Unsuccessful attempts have a thirty-second interval. Accepted habit remarks have a two-minute interval.
+Private local habit generation has a forty-five-second deadline because local cold generation needs more time.
+For the bundled Ollama endpoint, the launcher verifies the configured model and loads it before AIRI starts.
+The preload request uses an empty prompt and a thirty-minute residency through the [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md).
+
 Audio observations carry a source and word confidence.
 Missing confidence remains uncertain.
 Music commentary receives lyric lines only when clear audio words agree with current captions.

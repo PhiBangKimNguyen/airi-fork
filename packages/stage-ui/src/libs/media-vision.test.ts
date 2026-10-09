@@ -17,7 +17,7 @@ describe('co-watching attention policy', () => {
       text: 'в эту минуту',
       captionLanguage: 'ru',
       attention: 'static-music',
-      audioObservations: ['MUSIC: VOCALS: sung, Russian.'],
+      audioObservations: ['MUSIC: VOCALS: sung, Russian. WORDS: в эту минуту. WORDS_CONFIDENCE: clear.'],
       timeOfDay: 'afternoon',
       reactionAngle: 'time-choice',
       recentReplies: ['OLD_FAIRYTALE_ANCHOR'],

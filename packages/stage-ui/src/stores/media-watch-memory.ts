@@ -1,4 +1,4 @@
-import type { MediaWatchState } from '../libs/media-watch-memory'
+import type { MediaWatchState, WatchHint } from '../libs/media-watch-memory'
 
 import { useLocalStorage } from '@vueuse/core'
 import { defineStore } from 'pinia'
@@ -13,9 +13,11 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
   const habitProvider = useLocalStorage<'local' | 'brain' | 'gemini' | 'kimi'>('hybrid/watch-habit-provider', 'local')
   const timeAwareTeasing = useLocalStorage('hybrid/watch-time-aware', false)
   const timeTeasePeriods = useLocalStorage<string[]>('hybrid/watch-time-tease-periods', [])
-  const state = useLocalStorage<MediaWatchState>('hybrid/watch-memory', { version: 1, videos: [] })
+  const state = useLocalStorage<MediaWatchState>('hybrid/watch-memory', { version: 1, videos: [], lastPlaylistHint: 0 })
   const session = new MediaWatchSession()
   let lastHintAt = 0
+  let lastAttemptAt = 0
+  let pending: { url: string, hint: WatchHint } | undefined
   function memory() {
     return new MediaWatchMemory(JSON.parse(JSON.stringify(state.value)))
   }
@@ -33,20 +35,31 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
       state.value = current.snapshot()
   }
   function takeHint(url: string) {
-    if (!enabled.value || Date.now() - lastHintAt < 120_000)
+    const now = Date.now()
+    if (!enabled.value || pending || now - lastHintAt < 120_000 || now - lastAttemptAt < 30_000)
       return undefined
-    const sessionHint = session.takeHint(url)
-    if (sessionHint) {
-      lastHintAt = Date.now()
-      return sessionHint
-    }
     const current = memory()
-    const hint = current.takeHint(url)
+    // Persistent song and playlist context takes priority over session replay and channel counts.
+    const hint = current.takeHint(url) ?? session.takeHint(url)
     if (hint) {
-      lastHintAt = Date.now()
-      state.value = current.snapshot()
+      pending = { url, hint }
+      lastAttemptAt = now
     }
     return hint
+  }
+  function completeHint(url: string, hint: WatchHint) {
+    if (!enabled.value || pending?.url !== url || pending.hint !== hint)
+      return
+    const current = memory()
+    current.completeHint(url, hint)
+    session.completeHint(url, hint)
+    state.value = current.snapshot()
+    lastHintAt = Date.now()
+    pending = undefined
+  }
+  function releaseHint(url: string, hint: WatchHint) {
+    if (pending?.url === url && pending.hint === hint)
+      pending = undefined
   }
   function observeMusic(url: string, observations: readonly string[]) {
     if (!enabled.value)
@@ -70,7 +83,9 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
   function clear() {
     session.clear()
     lastHintAt = 0
-    state.value = { version: 1, videos: [] }
+    lastAttemptAt = 0
+    pending = undefined
+    state.value = { version: 1, videos: [], lastPlaylistHint: 0 }
     timeTeasePeriods.value = []
   }
   function canTimeTease(now: Date) {
@@ -82,5 +97,5 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
     timeTeasePeriods.value = [...timeTeasePeriods.value, period].slice(-10)
     return true
   }
-  return { enabled, habitProvider, timeAwareTeasing, preferences, playlist, musicPreferences, observe, observeMusic, takeHint, recent, remember, canTimeTease, rememberTimeTease, clear }
+  return { enabled, habitProvider, timeAwareTeasing, preferences, playlist, musicPreferences, observe, observeMusic, takeHint, completeHint, releaseHint, recent, remember, canTimeTease, rememberTimeTease, clear }
 })

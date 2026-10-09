@@ -19,6 +19,80 @@ import { useCharacterOrchestratorStore } from './store'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: ref('en'), t: (key: string) => key, te: () => true }) }))
 
 describe('media notification scheduling', () => {
+  it.runIf(hybridEnabled).each(['silence', 'accepted', 'timeout'] as const)('completes a private playlist allowance only after accepted output: $0', async (outcome) => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const channel = useModsServerChannelStore()
+    let publish: Parameters<typeof channel.onContextUpdate>[0] | undefined
+    vi.spyOn(channel, 'onContextUpdate').mockImplementation((callback) => {
+      publish = callback
+      return () => {}
+    })
+    vi.spyOn(channel, 'onEvent').mockImplementation(() => () => {})
+    const memory = useMediaWatchMemoryStore()
+    const previousEnabled = memory.enabled
+    const privacy = usePrivacyRoutingStore()
+    const previousMode = privacy.mode
+    const consciousness = useConsciousnessStore()
+    consciousness.activeProvider = 'hybrid-kimi'
+    consciousness.activeModel = 'airi-kimi'
+    vi.spyOn(consciousness, 'getChatProviderInstance').mockResolvedValue({ generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'http://127.0.0.1:18420/kimi/v1/' } }) })
+    const capture = vi.spyOn(privacy, 'capture')
+    const complete = vi.spyOn(memory, 'completeHint')
+    const release = vi.spyOn(memory, 'releaseHint')
+    let signal: AbortSignal | undefined
+    vi.spyOn(useLLM(), 'stream').mockImplementation(async (_model, _provider, _conversation, options) => {
+      signal = options?.abortSignal
+      if (outcome === 'timeout')
+        await new Promise<void>(() => {})
+      if (outcome === 'accepted')
+        await options?.onStreamEvent?.({ type: 'text-delta', text: 'ふふ、ライブ版が三曲も集まったね。\n\n(Heh, you have collected three live versions.)' })
+    })
+    const store = useCharacterOrchestratorStore()
+    const current = { url: 'https://www.youtube.com/watch?v=playlist2', title: 'Artist - Song 2 (Live)', isPlaying: true }
+    const context = (lane: string, metadata: Record<string, unknown>) => publish?.({ type: 'context:update', metadata: { source: { kind: 'plugin', plugin: { id: 'fixture' }, id: 'fixture' }, event: { id: lane } }, data: { id: lane, contextId: lane, lane, text: '', strategy: ContextUpdateStrategy.ReplaceSelf, metadata: { source: 'web-extension', ...metadata } } })
+    const share = () => context('web:sharing', { sharingId: 'playlist-share', sharingSessionId: 'grant', url: current.url, cloudVideoVision: true })
+    try {
+      memory.clear()
+      memory.enabled = true
+      privacy.mode = 'cloud'
+      for (let index = 0; index < 3; index++) {
+        const item = { ...current, url: `https://www.youtube.com/watch?v=playlist${index}`, title: `Artist - Song ${index} (Live)` }
+        memory.observe(item)
+        vi.advanceTimersByTime(30_000)
+        memory.observe(item)
+      }
+      store.initialize()
+      share()
+      context('web:video', current)
+      await store.handleSparkNotify({ type: 'spark:notify', source: 'fixture', data: { id: 'playlist', eventId: 'playlist', kind: 'ping', urgency: 'soon', headline: 'Shared media', destinations: ['character'], payload: { source: 'web-extension-cloud-video', sharingId: 'playlist-share', url: current.url, title: current.title, expiresAt: Date.now() + 60_000, frames: ['data:image/jpeg;base64,YWJj'] } } })
+      await vi.advanceTimersByTimeAsync(2000)
+      if (outcome === 'timeout') {
+        await vi.advanceTimersByTimeAsync(20_000)
+        expect(store.processing).toBe(true)
+        share()
+        await vi.advanceTimersByTimeAsync(25_000)
+        expect(signal?.aborted).toBe(true)
+      }
+      expect(capture.mock.results[0].value.lane).toBe('local')
+      expect(capture.mock.calls[0][0].text).toContain('PRIVATE listening preferences')
+      expect(complete).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0)
+      expect(release).toHaveBeenCalledOnce()
+      expect(store.processing).toBe(false)
+      vi.advanceTimersByTime(30_000)
+      memory.observe(current)
+      expect(memory.takeHint(current.url)?.kind).toBe(outcome === 'accepted' ? undefined : 'playlist')
+    }
+    finally {
+      store.dispose()
+      memory.clear()
+      memory.enabled = previousEnabled
+      privacy.mode = previousMode
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
+
   it.runIf(hybridEnabled)('retries a silent idle slot before the long success interval', async () => {
     vi.useFakeTimers()
     setActivePinia(createPinia())
