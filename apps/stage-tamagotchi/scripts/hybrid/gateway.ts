@@ -14,6 +14,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseEnv } from 'node:util'
 
+import { mediaReactionLengthPrompt } from '@proj-airi/stage-ui/libs/media-reaction-performance'
 import { completionDestination as destination } from '@proj-airi/stage-ui/libs/model-role-profile'
 import { ModelRoleRouter } from '@proj-airi/stage-ui/libs/model-roles'
 import { normalizeAuditoryObservation } from '@proj-airi/stage-ui/libs/sensory-context'
@@ -56,8 +57,6 @@ const mediaBody = v.object({
   max_tokens: v.optional(v.number()),
 })
 
-// Spoken replies stay short. This rule overrides longer guidance in a character card.
-const replyLength = 'Keep each reply to one or two short spoken sentences, and prefer one. This limit overrides longer personality guidance. Go longer only when the user explicitly asks for an explanation, steps, or code.'
 // A literal gloss loses the character. The pairs show tone transfer. They must not steer Japanese word choice.
 const bilingualStyle = `Use youthful, casual friend-to-friend Japanese and natural punctuation for pauses. Avoid formal desu/masu endings and honorific assistant phrasing. Vary openings and endings from reply to reply. Match the moment. Keep teasing affectionate and grounded in available facts. ${bilingualEnglishStyle}`
 
@@ -183,7 +182,7 @@ export function createGateway(profiles: Record<string, GatewayProfile>, token: s
       response.setHeader('vary', 'Origin')
     }
     if (request.method === 'OPTIONS') {
-      response.writeHead(204, { 'access-control-allow-headers': 'authorization,content-type,x-airi-synthetic-media', 'access-control-allow-methods': 'GET,POST,OPTIONS' })
+      response.writeHead(204, { 'access-control-allow-headers': 'authorization,content-type,x-airi-synthetic-media,x-airi-watching', 'access-control-allow-methods': 'GET,POST,OPTIONS' })
       response.end()
       return
     }
@@ -399,7 +398,11 @@ export function createGateway(profiles: Record<string, GatewayProfile>, token: s
           body.reasoning = { enabled: false }
         }
       }
+      const watching = !!mediaRoute || request.headers['x-airi-watching'] === 'true'
+      if (watching)
+        body.max_tokens = Math.min(typeof body.max_tokens === 'number' ? body.max_tokens : 384, 384)
       if (replyLanguage) {
+        const replyLength = watching ? mediaReactionLengthPrompt : ''
         // Keep personality and language in one opening instruction. Some compatible APIs replace earlier system messages.
         let languageRule = replyLanguage === 'ja'
           ? `Reply in natural, casual Japanese for local Japanese speech. ${replyLength} Use natural Japanese commas and sentence punctuation so the voice can pause. Keep code, URLs, and technical identifiers unchanged.`

@@ -18,6 +18,8 @@ export { isContentArrayRelatedError, isToolRelatedError } from '@proj-airi/core-
 
 /** Core stream options plus the stage-ui reader of images in tool results. */
 export interface LlmStreamOptions extends StreamOptions {
+  /** Marks an autonomous watching reaction for gateway brevity rules. Normal conversation leaves this absent. */
+  watching?: boolean
   /** Reads the images in tool results as text. See {@link resolveLlmTools}. */
   describeToolImage?: DescribeToolImage
 }
@@ -55,7 +57,7 @@ export const useLLM = defineStore('llm', () => {
       const originalOptions = options
       if (request && (lane !== 'local' || request.media))
         context = request.media ? privacy.router.mediaConversation(request) : privacy.router.cloudConversation(request)
-      if (lane === 'local' && !request?.media) {
+      if (lane === 'local' && !request?.media && !options?.watching) {
         const watchMemory = useMediaWatchMemoryStore()
         const privateText = [
           useUserProfileStore().localPrompt,
@@ -77,10 +79,15 @@ export const useLLM = defineStore('llm', () => {
       const requestConfig = chatProvider.generation(model).config
       if (!isLoopbackUrl(String(requestConfig.baseURL)))
         throw new Error('Hybrid inference requires the local gateway.')
+      const headers: Record<string, string> = {}
+      if (originalOptions?.watching)
+        headers['X-AIRI-Watching'] = 'true'
+      if (request?.lane === 'inkling' && request.media?.researchMedia)
+        headers['X-AIRI-Synthetic-Media'] = 'true'
       options = {
         ...originalOptions,
         providerId: `hybrid-${lane}`,
-        headers: request?.lane === 'inkling' && request.media?.researchMedia ? { 'X-AIRI-Synthetic-Media': 'true' } : undefined,
+        headers: Object.keys(headers).length ? headers : undefined,
         resolveStep: undefined,
         supportsTools: lane === 'local' && !request?.media && originalOptions?.supportsTools !== false,
         tools: lane === 'local' && !request?.media ? originalOptions?.tools : undefined,
@@ -115,7 +122,9 @@ export const useLLM = defineStore('llm', () => {
   async function runStream(model: string, chatProvider: GenerationProvider, context: Conversation, options?: LlmStreamOptions) {
     const key = modelKey(model, chatProvider.generation(model))
     let toolExecutionStarted = false
-    const { tools: customTools, describeToolImage, ...streamOptions } = options ?? {}
+    const coreOptions = { ...options }
+    delete coreOptions.watching
+    const { tools: customTools, describeToolImage, ...streamOptions } = coreOptions
     const builtinToolsResolver = () => resolveLlmTools({ customTools, describeImage: describeToolImage })
 
     const runStream = () => coreStreamFrom({

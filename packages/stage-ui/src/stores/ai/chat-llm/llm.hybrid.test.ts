@@ -35,6 +35,30 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('hybrid LLM boundary', () => {
+  it.each([true, false])('scopes watching headers and avoids duplicate private history only during watching: %s', async (watching) => {
+    const { useMediaWatchMemoryStore } = await import('../../media-watch-memory')
+    const { usePrivacyRoutingStore } = await import('../../privacy-routing')
+    const { useLLM } = await import('./llm')
+    const memory = useMediaWatchMemoryStore()
+    const previousEnabled = memory.enabled
+    try {
+      memory.clear()
+      memory.enabled = true
+      memory.observe({ url: 'https://www.youtube.com/watch?v=fixturebrief', title: 'PRIVATE_DUPLICATED_HISTORY', isPlaying: true })
+      const privacy = usePrivacyRoutingStore()
+      const request = privacy.capture({ sessionId: 'private-watch-memory', turnId: 'brief', text: 'A bounded playlist hint', privateInput: true, ambient: true, historyExists: false })
+      await useLLM().stream('untrusted', arbitraryCloud, privateConversation, { watching, requestCorrelation: { conversationId: request.sessionId, turnId: request.turnId } })
+      const call = stream.mock.calls[0][0] as Parameters<typeof streamFrom>[0]
+      expect(call.options?.headers?.['X-AIRI-Watching']).toBe(watching ? 'true' : undefined)
+      expect(JSON.stringify(call.conversation).includes('PRIVATE_DUPLICATED_HISTORY')).toBe(!watching)
+      expect(call.options).not.toHaveProperty('watching')
+    }
+    finally {
+      memory.clear()
+      memory.enabled = previousEnabled
+    }
+  })
+
   it('rejects a merged time hint before streaming when time consent is revoked', async () => {
     const { useMediaWatchMemoryStore } = await import('../../media-watch-memory')
     const { usePrivacyRoutingStore } = await import('../../privacy-routing')

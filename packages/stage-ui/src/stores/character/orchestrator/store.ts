@@ -153,6 +153,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
             requestCorrelation: correlation,
             abortSignal: signal,
             temperature: media ? 1.05 : undefined,
+            watching: !!media,
           },
         ),
       },
@@ -169,6 +170,10 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
               return
             const reply = media ? parseMediaReaction(text) : { text: opening && opened ? `${opening}${text}` : text }
             if (media) {
+              if ('rejected' in reply && reply.rejected) {
+                console.info('Media reaction skipped', { eventId, reason: reply.rejected === 'length' ? 'watching-length-limit' : 'watching-format-invalid' })
+                return
+              }
               if (unsupportedLyricClaim(reply.text, media.lyricsAvailable === true)) {
                 console.info('Media reaction skipped', { eventId, reason: 'uncorroborated-lyric-claim' })
                 return

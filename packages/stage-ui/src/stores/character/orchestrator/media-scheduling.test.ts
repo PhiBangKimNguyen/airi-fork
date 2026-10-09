@@ -19,7 +19,7 @@ import { useCharacterOrchestratorStore } from './store'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: ref('en'), t: (key: string) => key, te: () => true }) }))
 
 describe('media notification scheduling', () => {
-  it.runIf(hybridEnabled).each(['silence', 'accepted', 'timeout'] as const)('completes a private playlist allowance only after accepted output: $0', async (outcome) => {
+  it.runIf(hybridEnabled).each(['silence', 'accepted', 'timeout', 'overlong', 'annotation'] as const)('completes a private playlist allowance only after accepted output: $0', async (outcome) => {
     vi.useFakeTimers()
     setActivePinia(createPinia())
     const channel = useModsServerChannelStore()
@@ -45,6 +45,10 @@ describe('media notification scheduling', () => {
       signal = options?.abortSignal
       if (outcome === 'timeout')
         await new Promise<void>(() => {})
+      if (outcome === 'overlong')
+        await options?.onStreamEvent?.({ type: 'text-delta', text: `${'あ'.repeat(150)}。` })
+      if (outcome === 'annotation')
+        await options?.onStreamEvent?.({ type: 'text-delta', text: '[PRIVATE listening preferences]ライブ版が集まったね。\n(You have collected live versions.)' })
       if (outcome === 'accepted')
         await options?.onStreamEvent?.({ type: 'text-delta', text: 'ふふ、ライブ版が三曲も集まったね。\n\n(Heh, you have collected three live versions.)' })
     })

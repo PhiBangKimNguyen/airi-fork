@@ -312,8 +312,12 @@ describe('hybrid gateway', () => {
     })
     expect((await send('media/gemini')).status).toBe(200)
     expect(received.mock.calls[0][0].messages[0].content).toContain('[prosody tone=KIND focus=WORD]')
+    expect(received.mock.calls[0][0].messages[0].content).toContain('one or two short spoken sentences')
+    expect(received.mock.calls[0][0].max_tokens).toBe(384)
     expect((await send('gemini')).status).toBe(200)
     expect(received.mock.calls[1][0].messages[0].content).not.toContain('[prosody')
+    expect(received.mock.calls[1][0].messages[0].content).not.toContain('one or two short spoken sentences')
+    expect(received.mock.calls[1][0].max_tokens).toBe(4096)
   })
 
   it('pins independent media model and effort settings without changing chat or audio settings', async () => {
@@ -560,9 +564,19 @@ describe('hybrid gateway', () => {
     expect(received.mock.calls[0][0].messages.filter((message: { role: string }) => message.role === 'system')).toHaveLength(1)
     expect(received.mock.calls[0][0].messages[0].content).toContain('Japanese')
     expect(received.mock.calls[0][0].messages[0].content).toContain('English translation enclosed in ASCII parentheses')
-    expect(received.mock.calls[0][0].messages[0].content).toContain('one or two short spoken sentences')
+    expect(received.mock.calls[0][0].messages[0].content).not.toContain('one or two short spoken sentences')
     expect(received.mock.calls[0][0].messages[0].content).toContain('Translate intent, attitude, and rhythm, not words.')
     expect(received.mock.calls[0][0].messages[0].content).toContain('existential lines retain restrained poetry')
+    const watching = await fetch(`${gateway}/local/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'authorization': `Bearer ${token}`, 'X-AIRI-Watching': 'true' },
+      body: JSON.stringify({ max_tokens: 9999, messages: [{ role: 'user', content: 'Private playlist hint' }] }),
+    })
+    expect(watching.status).toBe(200)
+    expect(received.mock.calls[1][0].messages[0].content).toContain('one or two short spoken sentences')
+    expect(received.mock.calls[1][0].max_tokens).toBe(384)
+    const preflight = await fetch(`${gateway}/local/v1/chat/completions`, { method: 'OPTIONS' })
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('x-airi-watching')
   })
 
   it('blocks tools, images, and tool history before a cloud request', async () => {

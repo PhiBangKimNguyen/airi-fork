@@ -41,6 +41,18 @@ Private local habit generation has a forty-five-second deadline because local co
 For the bundled Ollama endpoint, the launcher verifies the configured model and loads it before AIRI starts.
 The preload request uses an empty prompt and a thirty-minute residency through the [Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md).
 
+Watching requests carry `X-AIRI-Watching`. Public media endpoints imply the same scope.
+Only these requests receive the short-sentence prompt and a 384-token output budget.
+Normal conversation has no watching sentence limit.
+Private watching requests retain their selected hint without another full preference-history injection.
+Before speech or captions, `parseMediaReaction` checks the spoken dialogue through the Japanese speech filter.
+Watching allows at most two sentences, sixty characters per sentence, and eighty characters total, excluding whitespace and metadata.
+English translations do not contribute to the spoken count.
+Overlong output is rejected as a complete reply. Japanese and English therefore cannot become misaligned through truncation.
+Rejected output consumes no listening-hint allowance and creates no speech intent or avatar cue.
+Unknown square-bracket annotations and parenthesized-only dialogue reject the complete bilingual reply.
+Song titles remain valid in ordinary dialogue, including works named Memory or 記憶.
+
 Audio observations carry a source and word confidence.
 Missing confidence remains uncertain.
 Music commentary receives lyric lines only when clear audio words agree with current captions.
