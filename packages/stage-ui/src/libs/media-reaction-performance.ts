@@ -1,5 +1,6 @@
 import * as v from 'valibot'
 
+import { normalizeEnglishTitles } from './speech/bilingual-style'
 import { cleanReplyTemplate, JapaneseReplySpeech, speechCaption } from './speech/japanese-reply-speech'
 
 const emotionSchema = v.picklist(['happy', 'curious', 'surprised', 'awkward', 'think', 'neutral'])
@@ -12,6 +13,70 @@ const sentences = new Intl.Segmenter('ja', { granularity: 'sentence' })
 /** Media providers choose a cue independently of speech prosody. Neutral sends no new gesture. */
 export const mediaReactionPerformancePrompt = 'Prefix each nonempty reply with [emotion=NAME]. Use happy for delight. Use curious for wonder or a thoughtful observation. Use surprised for a sudden discovery. Use awkward for bashfulness. Use think for a dreamy, zoned-out, or unfocused moment. Use neutral for a calm or sincere moment. Match your reaction, not the video genre. The think cue never means anger or protest. The cue controls the avatar and is never spoken. Silence has no cue.'
 
+function englishCaptionAt(text: string, start: number) {
+  if (text[start] !== '(' && text[start] !== '（')
+    return
+  const closings: string[] = []
+  for (let index = start; index < text.length; index++) {
+    const char = text[index]
+    if (char === '(' || char === '（') {
+      closings.push(char === '(' ? ')' : '）')
+    }
+    else if (char === ')' || char === '）') {
+      if (closings.pop() !== char)
+        return
+      if (closings.length)
+        continue
+      const caption = normalizeEnglishTitles(text.slice(start + 1, index))
+      if (!/\p{Script=Latin}/u.test(caption) || /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(caption))
+        return
+      return { start, end: index + 1, text: caption }
+    }
+  }
+}
+
+/**
+ * Keeps the first completed watching reply pair. Consecutive replacement captions retain only the last English rendering.
+ * Later dialogue and unparenthesized commentary never extend that reply or bypass its spoken length limit.
+ * @example
+ * normalizeWatchingReply('猫だね。\n(A cat.)\n\n(It is a cat.)\nextra commentary')
+ * // => '猫だね。\n(It is a cat.)'
+ */
+export function normalizeWatchingReply(text: string): string {
+  const reply = cleanReplyTemplate(text).text.replace(/「\s*」/gu, '').trim()
+  for (let index = 0; index < reply.length; index++) {
+    const first = englishCaptionAt(reply, index)
+    if (!first)
+      continue
+    // Inline technical names remain part of Japanese dialogue. Sentence captions can also follow dialogue on the same line.
+    if (!/(?:^|\n)[ \t]*$/.test(reply.slice(0, index)) && !/[.!?]/.test(first.text)) {
+      index = first.end - 1
+      continue
+    }
+    let translation = first.text
+    let remaining = reply.slice(first.end)
+    let metadata = ''
+    while (remaining.trim()) {
+      const control = /^\s*(\[(?:emotion=[^\]\r\n]*|prosody[^\]\r\n]*)\])/.exec(remaining)
+      if (control) {
+        metadata += control[1]
+        remaining = remaining.slice(control[0].length)
+        continue
+      }
+      const start = remaining.length - remaining.trimStart().length
+      const replacement = englishCaptionAt(remaining, start)
+      if (!replacement)
+        break
+      translation = replacement.text
+      remaining = remaining.slice(replacement.end)
+    }
+    const dialogue = reply.slice(0, first.start)
+    const separator = /\n[ \t]*$/.test(dialogue) ? '' : '\n'
+    return `${dialogue}${separator}(${translation})${metadata}`
+  }
+  return reply
+}
+
 /**
  * Removes provider cues before duplicate checks, captions, and speech. Unknown cues never dispatch a performance action.
  * @example
@@ -19,7 +84,7 @@ export const mediaReactionPerformancePrompt = 'Prefix each nonempty reply with [
  * // => { text: 'えっ！\n(Whoa!)', emotion: 'surprised' }
  */
 export function parseMediaReaction(text: string): { text: string, emotion?: v.InferOutput<typeof emotionSchema>, rejected?: 'length' | 'format' } {
-  const reply = cleanReplyTemplate(text).text
+  const reply = normalizeWatchingReply(text)
   // The first cue owns the gesture. Remove every cue, including misplaced tags, before captions and speech.
   const cue = /\[emotion=([^\]\r\n]*)\]/.exec(reply)
   if (!cue && /^\s*(?:\[prosody[^\]\r\n]*\]\s*)?\[emotion(?:=|$)/.test(reply)) {

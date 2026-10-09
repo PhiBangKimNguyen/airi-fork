@@ -1,11 +1,13 @@
 /** The Kimi chat template can expose this delimiter before reply text. */
 const replyTemplateToken = '<|close|>response'
+const reasoningTokens = ['<think>', '</think>', '<reasoning>', '</reasoning>', '<analysis>', '</analysis>']
 
 /**
- * Removes complete template tokens and retains an unfinished suffix for the next stream chunk.
+ * Removes template tokens and reasoning blocks. Retains unfinished tokens or reasoning for the next stream chunk.
+ * An orphan closing tag ends the reply. Stream consumers must discard later chunks when `ended` is true.
  * @example
  * cleanReplyTemplate('<|close|>responseこんにちは。<|cl')
- * // => { text: 'こんにちは。', pending: '<|cl' }
+ * // => { text: 'こんにちは。', pending: '<|cl', ended: false }
  */
 export function cleanReplyTemplate(text: string) {
   // NOTICE:
@@ -13,13 +15,30 @@ export function cleanReplyTemplate(text: string) {
   // The upstream response includes <|close|>response as reply text.
   // Source: the hybrid Kimi output reported on 2026-10-08.
   // Remove this filter when the upstream guarantees replies without template delimiters.
-  const cleaned = text.replaceAll(replyTemplateToken, '')
-  for (let length = replyTemplateToken.length - 1; length > 0; length--) {
-    const prefix = replyTemplateToken.slice(0, length)
-    if (cleaned.endsWith(prefix))
-      return { text: cleaned.slice(0, -length), pending: prefix }
+  let cleaned = text.replaceAll(replyTemplateToken, '')
+  // Incomplete reasoning stays buffered until its closing tag arrives. No reasoning enters captions or speech.
+  while (true) {
+    const opening = /<(think|reasoning|analysis)>/i.exec(cleaned)
+    if (!opening)
+      break
+    const closing = `</${opening[1].toLowerCase()}>`
+    const end = cleaned.toLowerCase().indexOf(closing, opening.index + opening[0].length)
+    if (end < 0)
+      return { text: cleaned.slice(0, opening.index), pending: cleaned.slice(opening.index), ended: false }
+    cleaned = cleaned.slice(0, opening.index) + cleaned.slice(end + closing.length)
   }
-  return { text: cleaned, pending: '' }
+  // An orphan closing tag marks a malformed continuation. Text after it has no reliable reply boundary.
+  const orphan = /<\/(?:think|reasoning|analysis)>/i.exec(cleaned)
+  if (orphan)
+    return { text: cleaned.slice(0, orphan.index), pending: '', ended: true }
+  for (const token of [replyTemplateToken, ...reasoningTokens]) {
+    for (let length = token.length - 1; length > 0; length--) {
+      const prefix = token.slice(0, length)
+      if (cleaned.toLowerCase().endsWith(prefix.toLowerCase()))
+        return { text: cleaned.slice(0, -length), pending: cleaned.slice(-length), ended: false }
+    }
+  }
+  return { text: cleaned, pending: '', ended: false }
 }
 /**
  * Speaks Japanese while suppressing parenthetical notes and the trailing English translation.
@@ -28,6 +47,7 @@ export function cleanReplyTemplate(text: string) {
  */
 export class JapaneseReplySpeech {
   private templatePrefix = ''
+  private replyEnded = false
   private translationStarted = false
   private parentheticalDepth = 0
   private asciiParenthetical = false
@@ -35,10 +55,11 @@ export class JapaneseReplySpeech {
   private parentheticalLatin = false
 
   consume(chunk: string): string {
-    if (this.translationStarted)
+    if (this.translationStarted || this.replyEnded)
       return ''
     const cleaned = cleanReplyTemplate(this.templatePrefix + chunk)
     this.templatePrefix = cleaned.pending
+    this.replyEnded = cleaned.ended
     let speech = ''
     for (const char of cleaned.text) {
       if (char === '(' || char === '（') {
@@ -72,13 +93,14 @@ export class JapaneseReplySpeech {
 }
 
 /**
- * Hides speech metadata from complete replies and partial streamed captions.
+ * Hides speech and avatar metadata from complete replies and partial streamed captions.
  * @example
  * speechCaption('[prosody tone=sassy focus=ジャズ]ジャズっぽいね。')
  * // => 'ジャズっぽいね。'
  */
 export function speechCaption(text: string): string {
-  return cleanReplyTemplate(text).text.replace(/\[prosody[^\]\r\n]*(?:\]|$)/g, '').replace(/\[(?:p|pr|pro|pros|proso|prosod)?$/g, '')
+  const caption = cleanReplyTemplate(text).text.replace(/\[(?:prosody|emotion=)[^\]\r\n]*(?:\]|$)/g, '')
+  return caption.replace(/\[(?:p|pr|pro|pros|proso|prosod|e|em|emo|emot|emoti|emotio|emotion)?$/g, '')
 }
 
 /**

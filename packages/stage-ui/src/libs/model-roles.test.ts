@@ -137,6 +137,39 @@ describe('model roles', () => {
     expect(rendering.messages[1].content).toBe(JSON.stringify({ japanese }))
   })
 
+  it.each([false, true])('uses the approved song title with one caption, rendering outage: %s', async (outage) => {
+    const japanese = 'あの「イブの記憶」がまたポップに生まれ変わって、どうした。'
+    const draft = 'That "Ib no Kioku" was born again in a pop way... why so?'
+    const english = 'Hey, that "Ib no Kioku" has been reborn as something pop. What gives?'
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n(${draft})`, translation: draft }))
+      .mockResolvedValueOnce(outage ? new Response('', { status: 503 }) : reply({ translation: english }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, true, signal())
+    const translation = (outage ? draft : english).replace('Ib no Kioku', 'Ib\'s Memory')
+    expect(result.text).toBe(`${japanese}\n\n(${translation})`)
+    expect(result.translation).toBe(translation)
+  })
+
+  it('renders only the first watching reply when generated dialogue interleaves captions and thinking logs', async () => {
+    const japanese = 'えっ、あの「Memory」ってタイトル見たことあるわ。'
+    const english = 'Oh, I see that "Memory" title already.'
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n(${english})\nふふ、ピアノと弦楽器の対比が気になりそうね。\n(Lol, the contrast sounds intriguing.)\n</think>\nあさ〜...`, translation: english }))
+      .mockResolvedValueOnce(reply({ translation: english }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, true, signal())
+    expect(result.text).toBe(`${japanese}\n\n(${english})`)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.messages[1].content).toBe(JSON.stringify({ japanese }))
+  })
+
+  it('replaces an inline watching caption instead of duplicating it', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: 'この画像、静かな。(This image is quiet.)', translation: 'This image is quiet.' }))
+      .mockResolvedValueOnce(reply({ translation: 'This picture is so still.' }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, true, signal())
+    expect(result.text).toBe('この画像、静かな。\n\n(This picture is so still.)')
+  })
+
   it('removes multiple embedded captions and retains one normalized draft during rendering failure', async () => {
     const japanese = '[prosody tone=plain focus=]この曲、好きだな。'
     const english = 'I like this song (especially the piano).'
@@ -146,6 +179,19 @@ describe('model roles', () => {
     const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
     expect(result.text).toBe(`${japanese}\n\n(${english})`)
     expect(result.translation).toBe(english)
+  })
+
+  it.each([false, true])('replaces the photo caption with trailing emotion metadata, rendering outage: %s', async (outage) => {
+    const japanese = 'えっ、これって写真の裏側が赤く染まっているような？'
+    const draft = 'Ooh, does that red paint look like the backside of a photograph?'
+    const english = 'Well, does this look like red splatter on the other side of a photo?'
+    const transport = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(reply({ action: 'speak', text: `${japanese}\n(${draft})\n[emotion=curious]`, translation: draft }))
+      .mockResolvedValueOnce(outage ? new Response('', { status: 503 }) : reply({ translation: english }))
+    const result = await new ModelRoleRouter(roles, 'ja-en').react(context, false, signal())
+    expect(result.text).toBe(`${japanese}[emotion=curious]\n\n(${outage ? draft : english})`)
+    const rendering = JSON.parse(String(transport.mock.calls[1]?.[1]?.body))
+    expect(rendering.messages[1].content).not.toContain(draft)
   })
 
   it('preserves Japanese notes, inline technical parentheses and expression markers', async () => {

@@ -4,8 +4,10 @@ import type { GatewayProfile } from './model-role-profile'
 
 import * as v from 'valibot'
 
+import { normalizeWatchingReply } from './media-reaction-performance'
 import { completionDestination } from './model-role-profile'
-import { bilingualEnglishStyle, englishRenderingInstruction } from './speech/bilingual-style'
+import { bilingualEnglishStyle, englishRenderingInstruction, normalizeEnglishTitles } from './speech/bilingual-style'
+import { cleanReplyTemplate } from './speech/japanese-reply-speech'
 
 const shortText = v.pipe(v.string(), v.maxLength(1400))
 const observationSchema = v.object({
@@ -105,18 +107,25 @@ function finalParentheticalStart(text: string): number {
  * // => '猫だね。'
  */
 function dialogueOnly(text: string): string {
-  let dialogue = text.trim()
-  // Models can embed a caption despite the separate field contract. Remove only standalone trailing English groups.
+  let dialogue = cleanReplyTemplate(text).text.trim()
+  let metadata = ''
+  // Trailing control tags are metadata, not dialogue. Retain them while removing embedded English captions.
   while (dialogue) {
+    const control = /\s*(\[(?:emotion=[^\]\r\n]*|prosody[^\]\r\n]*)\])$/.exec(dialogue)
+    if (control) {
+      metadata = control[1] + metadata
+      dialogue = dialogue.slice(0, control.index).trimEnd()
+      continue
+    }
     const start = finalParentheticalStart(dialogue)
     if (start < 0 || !/(?:^|\n)[ \t]*$/.test(dialogue.slice(0, start)))
       break
-    const content = dialogue.slice(start + 1, -1)
+    const content = normalizeEnglishTitles(dialogue.slice(start + 1, -1))
     if (!/\p{Script=Latin}/u.test(content) || /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(content))
       break
     dialogue = dialogue.slice(0, start).trimEnd()
   }
-  return dialogue
+  return dialogue + metadata
 }
 
 /**
@@ -126,7 +135,7 @@ function dialogueOnly(text: string): string {
  * // => 'A song (live).'
  */
 function unwrappedTranslation(text: string): string {
-  let translation = text.trim()
+  let translation = normalizeEnglishTitles(cleanReplyTemplate(text).text.trim())
   // The caption assembler owns the outer parentheses. Nested parentheses inside English remain unchanged.
   while (translation && finalParentheticalStart(translation) === 0)
     translation = translation.slice(1, -1).trim()
@@ -318,7 +327,7 @@ export class ModelRoleRouter {
     if (decision.action === 'escalate' && (!decision.escalation_level || !decision.escalation_reason?.trim()))
       throw new Error('Escalation requires a level and reason.')
     if (this.replyLanguage === 'ja-en' && decision.action === 'speak') {
-      decision.text = dialogueOnly(decision.text)
+      decision.text = dialogueOnly(ambient ? normalizeWatchingReply(decision.text) : decision.text)
       decision.translation = unwrappedTranslation(decision.translation ?? '')
       if (!decision.translation || !decision.text || decision.text.startsWith('('))
         throw new Error('Bilingual replies require dialogue and a separate translation.')

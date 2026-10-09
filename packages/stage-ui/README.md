@@ -35,6 +35,15 @@ Disable viewing memory to stop collection. Forget viewing history to delete song
 
 Video and viewing-habit replies choose an emotion cue with their spoken reaction.
 The media boundary removes `[emotion=NAME]` before duplicate checks, captions, and speech.
+It removes cues from any reply position. The first cue controls the gesture, and repeated cues remain hidden.
+Caption filtering also hides incomplete emotion tags during streaming.
+Bilingual replies retain one English caption, including when emotion or prosody tags follow an embedded draft translation.
+Watching replies retain the first completed Japanese/English pair. Consecutive English revisions replace its caption.
+Later Japanese paragraphs and English commentary are discarded before duplicate checks, captions, and speech.
+The retained dialogue still obeys the spoken length limit. An overlong first reply remains silent.
+Reasoning blocks remain hidden during streaming. An orphan closing reasoning tag discards the malformed continuation after it.
+English captions use the requested title “Ib's Memory” for イブの記憶. Japanese dialogue and unrelated song titles remain unchanged.
+Empty Japanese quotation marks disappear before captions and speech. Quoted song titles remain intact.
 The speech intent carries an ACT token through the existing Eventa bus.
 The stage applies the cue once when that reply starts playback. Failed or canceled speech discards the cue.
 Automatic reactions call the scene directly without changing the persisted motion selection.

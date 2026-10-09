@@ -6,6 +6,8 @@ import type { ModelRoles } from '@proj-airi/stage-ui/libs/model-roles'
 import { Buffer } from 'node:buffer'
 import { createServer } from 'node:http'
 
+import { parseMediaReaction } from '@proj-airi/stage-ui/libs/media-reaction-performance'
+import { speechCaption } from '@proj-airi/stage-ui/libs/speech/japanese-reply-speech'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createGateway } from './gateway'
@@ -99,6 +101,40 @@ describe('hybrid gateway', () => {
     expect(requests[1]?.messages[1]?.content).toBe(JSON.stringify({ japanese }))
     expect(JSON.stringify(requests[1]?.messages)).not.toContain('Synthetic idle question.')
     expect(requests[0]?.messages[0]?.content).not.toContain(japanese)
+  })
+
+  it('shows one photo translation and consumes the trailing avatar cue through the media HTTP route', async () => {
+    const nativeFetch = globalThis.fetch
+    const japanese = 'えっ、これって写真の裏側が赤く染まっているような？'
+    const draft = 'Ooh, does that red paint look like the backside of a photograph?'
+    const english = 'Well, does this look like red splatter on the other side of a photo?'
+    const profile: GatewayProfile = { private: false, baseUrl: `https://api.cloudflare.com/client/v4/accounts/${'a'.repeat(32)}/ai/v1/`, model: 'test-brain', apiKey: 'synthetic-secret' }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, options) => {
+      if (String(input).startsWith('https://api.cloudflare.com/')) {
+        const body = JSON.parse(String(options?.body))
+        const content = body.response_format?.json_schema?.name === 'english_rendering'
+          ? { translation: english }
+          : { action: 'speak', text: `${japanese}\n(${draft})\n[emotion=curious]`, translation: draft }
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }))
+      }
+      return nativeFetch(input, options)
+    })
+    const gateway = await listen(createGateway({ brain: profile }, token, undefined, 'ja-en', true, false, { brain: profile }))
+    const response = await fetch(`${gateway}/media/brain/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [
+        { role: 'system', content: 'Synthetic character.' },
+        { role: 'user', content: [{ type: 'text', text: 'Synthetic photo observation.' }] },
+      ] }),
+    })
+    expect(response.status).toBe(200)
+    const completion = await response.json()
+    const reaction = parseMediaReaction(completion.choices[0].message.content)
+    expect(reaction.emotion).toBe('curious')
+    expect(reaction.text).toBe(`${japanese}\n\n(${english})`)
+    expect(speechCaption(reaction.text)).not.toContain('[emotion=')
+    expect(reaction.text).not.toContain(draft)
   })
 
   it('does not send disabled vision or cloud tools to the brain', async () => {

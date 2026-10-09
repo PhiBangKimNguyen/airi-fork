@@ -3,6 +3,25 @@ import { describe, expect, it } from 'vitest'
 import { JapaneseReplySpeech, speechCaption, speechTextForProvider } from './japanese-reply-speech'
 
 describe('japanese reply speech', () => {
+  it('discards every later speech chunk after an orphan reasoning close', () => {
+    const reply = 'こんにちは。</think>追加のログ。'
+    for (let split = 0; split <= reply.length; split++) {
+      const speech = new JapaneseReplySpeech()
+      expect(speech.consume(reply.slice(0, split)) + speech.consume(reply.slice(split))).toBe('こんにちは。')
+      expect(speech.consume('もっとログ。')).toBe('')
+    }
+  })
+
+  it.each(['think', 'THINK', 'reasoning', 'analysis'])('suppresses %s blocks across every stream split before speech and captions', (tag) => {
+    const reply = `<${tag}>秘密の文章。</${tag}>こんにちは。\n(Hello.)`
+    for (let split = 0; split <= reply.length; split++) {
+      const speech = new JapaneseReplySpeech()
+      expect(speech.consume(reply.slice(0, split)) + speech.consume(reply.slice(split))).toBe('こんにちは。\n')
+    }
+    expect(speechCaption(reply)).toBe('こんにちは。\n(Hello.)')
+    expect(speechCaption('こんにちは。\n(Hello.)</think>extra logs')).toBe('こんにちは。\n(Hello.)')
+  })
+
   it.each(['（笑）', '(笑)', '（笑)', '（小声で）'])('suppresses %s across every stream split and resumes Japanese speech', (note) => {
     const response = `え、また戻ってきたわけ？${note}どんだけこれ好きなのさ。\n(Back again? You really love this.)`
     for (let split = 0; split <= response.length; split++) {
@@ -53,6 +72,14 @@ describe('japanese reply speech', () => {
 })
 
 describe('speech metadata captions', () => {
+  it('hides complete and partial emotion metadata in captions', () => {
+    const tag = '[emotion=curious]'
+    const line = 'えっ、赤いね。\n(Whoa, it is red!)'
+    for (let split = 1; split <= tag.length; split++)
+      expect(speechCaption(line + tag.slice(0, split))).toBe(line)
+    expect(speechCaption(tag + line + tag)).toBe(line)
+  })
+
   it('removes the Kimi reply token from captions and all speech providers', () => {
     const reply = '<|close|>response[prosody tone=plain]こんにちは。\n(Hello.)'
     expect(speechCaption(reply)).toBe('こんにちは。\n(Hello.)')

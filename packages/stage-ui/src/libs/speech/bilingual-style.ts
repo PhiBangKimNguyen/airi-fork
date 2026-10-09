@@ -12,7 +12,19 @@ export const bilingualEnglishStyle = [
   'Read the English as a standalone line before returning it. Rewrite awkward literal phrasing without explaining the metaphor.',
   'Keep the Japanese dialogue independent from its English rendering. Never replace Japanese dialogue with English.',
   'Do not add language labels, stage directions, romaji, or emoticons.',
+  'Render the title イブの記憶 as "Ib\'s Memory" in English, never Ib no Kioku. Preserve supplied English song titles.',
 ].join(' ')
+
+/**
+ * Applies the user-approved English name to this song without changing unrelated titles.
+ * Callers supply only the English caption, never Japanese dialogue.
+ * @example
+ * normalizeEnglishTitles('That "Ib no Kioku" arrangement.')
+ * // => 'That "Ib\'s Memory" arrangement.'
+ */
+export function normalizeEnglishTitles(text: string): string {
+  return text.replace(/\bIb(?: no Kioku| Memory| 記憶)\b|イブの記憶/giu, 'Ib\'s Memory')
+}
 
 /** The rendering request receives only completed dialogue, without history or character-generation instructions. */
 export const englishRenderingInstruction = [

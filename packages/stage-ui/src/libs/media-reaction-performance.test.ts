@@ -2,8 +2,47 @@ import { describe, expect, it } from 'vitest'
 
 import { MediaReactionMemory } from './media-reaction-memory'
 import { parseMediaReaction } from './media-reaction-performance'
+import { JapaneseReplySpeech, speechCaption } from './speech/japanese-reply-speech'
 
 describe('media reaction performance', () => {
+  it('removes empty Japanese quotation marks before captions and speech', () => {
+    const dialogue = 'ふふ、これは静寂が音を立ててくっつく感じだね。'
+    const caption = '(Heh, it\'s like silence makes an actual sound together here.)'
+    const reaction = parseMediaReaction(`「」\n${dialogue}\n\n${caption}`)
+    expect(reaction.text).toBe(`${dialogue}\n\n${caption}`)
+    expect(speechCaption(reaction.text)).toBe(`${dialogue}\n\n${caption}`)
+    expect(new JapaneseReplySpeech().consume(reaction.text)).toBe(`${dialogue}\n\n`)
+    expect(parseMediaReaction('「 \n 」')).toEqual({ text: '' })
+    expect(parseMediaReaction('「Memory」だね。\n(It is "Memory".)').text).toBe('「Memory」だね。\n(It is "Memory".)')
+  })
+
+  it('keeps one English caption with the requested title translation', () => {
+    const japanese = 'あの「イブの記憶」がまたポップに生まれ変わって、どうした。'
+    const reply = `${japanese}\n(That "Ib no Kioku" was born again in a pop way... why so?)\n\n(Hey, that "Ib no Kioku" has been reborn as something pop. What gives?)`
+    expect(parseMediaReaction(reply).text).toBe(`${japanese}\n(Hey, that "Ib's Memory" has been reborn as something pop. What gives?)`)
+  })
+
+  it('keeps the first Memory reply pair and discards later dialogue and dangling thinking output', () => {
+    const first = 'えっ、あの「Memory」ってタイトル見たことあるわ。  \n(Oh, I see that "Memory" title already.)'
+    const reply = `${first}  \n\nふふ、ピアノと弦楽器の対比が気になりそうね。\n(Lol, the contrast between piano and violin sounds intriguing.)\n</think>\n\nあさ〜...ふふっ (Ah...)\n(Hmm, huh-huh)`
+    expect(parseMediaReaction(reply)).toEqual({ text: first })
+  })
+
+  it('discards English commentary and inline bilingual continuations before captions and speech', () => {
+    const first = '「はからさまに虚勢を張って ゆく 追い越される」\n\n(Hopelessly bluffed and gradually overtaken, it says.)'
+    const reply = `${first}  \nThe lyrics keep this quiet rhythm—almost like a confession slipping out of someone’s breath.\nこの画像、静かな。音楽だけ聞こうか。(This image is quiet and still. Let's listen to the music.)\n\n(Hey, this picture's pretty peaceable. I'm going to focus on the melody.)`
+    expect(parseMediaReaction(reply)).toEqual({ text: first })
+    const reaction = parseMediaReaction(reply)
+    expect(speechCaption(reaction.text)).toBe(first)
+    expect(new JapaneseReplySpeech().consume(reaction.text)).toBe('「はからさまに虚勢を張って ゆく 追い越される」\n\n')
+  })
+
+  it('removes complete reasoning blocks before choosing a reply pair', () => {
+    const text = 'こんにちは。\n(Hello.)'
+    expect(parseMediaReaction(`<think>秘密の文章。\n(Private thoughts.)</think>${text}`)).toEqual({ text })
+    expect(parseMediaReaction('<think>秘密の文章。\n(Private thoughts.)')).toEqual({ text: '' })
+  })
+
   it.each([
     '[Ib 記憶に続き、今回もしっとりとした空気感が戻ってきましたね。]\n(Ib Memory followed up, and this moody atmosphere has settled back in.)',
     '[PRIVATE listening preferences]ライブ版が集まったね。\n(You have collected live versions.)',
@@ -14,6 +53,21 @@ describe('media reaction performance', () => {
 
   it('keeps a song named Memory in ordinary dialogue', () => {
     const text = '「Ib 記憶」の別アレンジも集まったね。\n(You have collected another arrangement of Ib Memory.)'
+    expect(parseMediaReaction(text)).toEqual({ text: '「Ib 記憶」の別アレンジも集まったね。\n(You have collected another arrangement of Ib\'s Memory.)' })
+  })
+
+  it('preserves nested captions, Japanese notes and inline technical names', () => {
+    const text = 'YouTube (Music)で聴いてる。（小声で）\n(This song (the live version) sounds great.)'
+    expect(parseMediaReaction(text)).toEqual({ text })
+  })
+
+  it('retains avatar and speech metadata after a replacement caption', () => {
+    const text = '[prosody tone=curious focus=曲]この曲、好きだな。\n(I like this song.)\n(I love this song.)[emotion=happy]'
+    expect(parseMediaReaction(text)).toEqual({ text: '[prosody tone=curious focus=曲]この曲、好きだな。\n(I love this song.)', emotion: 'happy' })
+  })
+
+  it('preserves unrelated English song titles', () => {
+    const text = '「Memory」の別アレンジだね。\n(Another arrangement of "Memory".)'
     expect(parseMediaReaction(text)).toEqual({ text })
   })
 
