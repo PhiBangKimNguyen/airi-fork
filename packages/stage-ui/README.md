@@ -42,6 +42,8 @@ Watching replies retain the first completed Japanese/English pair. Consecutive E
 Later Japanese paragraphs and English commentary are discarded before duplicate checks, captions, and speech.
 The retained dialogue still obeys the spoken length limit. An overlong first reply remains silent.
 Reasoning blocks remain hidden during streaming. An orphan closing reasoning tag discards the malformed continuation after it.
+Captions and speech text hide ACT, DELAY, and other playback controls, including unfinished streamed markers.
+The marker parser retains ownership of playback actions and delays.
 English captions use the requested title “Ib's Memory” for イブの記憶. Japanese dialogue and unrelated song titles remain unchanged.
 Empty Japanese quotation marks disappear before captions and speech. Quoted song titles remain intact.
 The speech intent carries an ACT token through the existing Eventa bus.

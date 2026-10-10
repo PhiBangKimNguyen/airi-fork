@@ -40,6 +40,28 @@ export function cleanReplyTemplate(text: string) {
   }
   return { text: cleaned, pending: '', ended: false }
 }
+
+/**
+ * Projects model output into literal text. The marker parser owns playback controls, so their payloads never become dialogue.
+ * Incomplete controls remain pending until their closing delimiter arrives.
+ * @example
+ * literalReply('<|DELAY 2|>こんにちは。<|ACT {')
+ * // => { text: 'こんにちは。', pending: '<|ACT {', ended: false }
+ */
+function literalReply(text: string) {
+  const reply = cleanReplyTemplate(text)
+  const literal = reply.text.replace(/<\|[\s\S]*?\|>/g, '')
+  const unfinished = literal.indexOf('<|')
+  if (unfinished >= 0) {
+    return {
+      text: literal.slice(0, unfinished),
+      pending: literal.slice(unfinished) + reply.pending,
+      ended: reply.ended,
+    }
+  }
+  return { ...reply, text: literal }
+}
+
 /**
  * Speaks Japanese while suppressing parenthetical notes and the trailing English translation.
  * Each intent owns its filter. Parentheses can span stream chunks and use either width.
@@ -57,7 +79,7 @@ export class JapaneseReplySpeech {
   consume(chunk: string): string {
     if (this.translationStarted || this.replyEnded)
       return ''
-    const cleaned = cleanReplyTemplate(this.templatePrefix + chunk)
+    const cleaned = literalReply(this.templatePrefix + chunk)
     this.templatePrefix = cleaned.pending
     this.replyEnded = cleaned.ended
     let speech = ''
@@ -99,7 +121,7 @@ export class JapaneseReplySpeech {
  * // => 'ジャズっぽいね。'
  */
 export function speechCaption(text: string): string {
-  const caption = cleanReplyTemplate(text).text.replace(/\[(?:prosody|emotion=)[^\]\r\n]*(?:\]|$)/g, '')
+  const caption = literalReply(text).text.replace(/\[(?:prosody|emotion=)[^\]\r\n]*(?:\]|$)/g, '')
   return caption.replace(/\[(?:p|pr|pro|pros|proso|prosod|e|em|emo|emot|emoti|emotio|emotion)?$/g, '')
 }
 
@@ -111,5 +133,5 @@ export function speechCaption(text: string): string {
  * // => 'いいね。'
  */
 export function speechTextForProvider(text: string, providerId: string): string {
-  return providerId === 'voicevox' ? cleanReplyTemplate(text).text : speechCaption(text)
+  return providerId === 'voicevox' ? literalReply(text).text : speechCaption(text)
 }

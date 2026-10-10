@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { useLlmmarkerParser } from '../../composables/llm-marker-parser'
 import { JapaneseReplySpeech, speechCaption, speechTextForProvider } from './japanese-reply-speech'
 
 describe('japanese reply speech', () => {
@@ -72,6 +73,47 @@ describe('japanese reply speech', () => {
 })
 
 describe('speech metadata captions', () => {
+  it('preserves playback control delivery while filtering literal speech and captions', async () => {
+    const action = '<|ACT {"emotion":{"name":"curious","intensity":0.7}}|>'
+    const delay = '<|DELAY 2|>'
+    const reply = `${action}${delay}こんにちは。\n(Hello.)`
+    const controls: string[] = []
+    const speech = new JapaneseReplySpeech()
+    let spoken = ''
+    const parser = useLlmmarkerParser({
+      onLiteral: (literal) => { spoken += speech.consume(literal) },
+      onSpecial: (special) => { controls.push(special) },
+    })
+    for (const char of reply)
+      await parser.consume(char)
+    await parser.end()
+    expect(controls).toEqual([action, delay])
+    expect(spoken).toBe('こんにちは。\n')
+    expect(speechCaption(reply)).toBe('こんにちは。\n(Hello.)')
+  })
+
+  it('hides the reported idle musing controls while retaining its dialogue and caption', () => {
+    const question = 'If we never meet again, will my shadow still follow where I step tomorrow?'
+    const thought = 'Maybe the world is just waiting for a ghost to remember itself.'
+    const translation = '(If we never meet again, do you think my shadow will still follow me somewhere tomorrow? Perhaps the whole world is merely waiting for a ghost to find itself.)'
+    const reply = `<|ACT {"emotion":"curious","intensity":0.7}|><|DELAY 2|> ${question} <|ACT {"emotion":"thoughtful","intensity":0.5}|><|DELAY 1|> ${thought} ${translation}`
+    const visible = ` ${question}  ${thought} ${translation}`
+    expect(speechCaption(reply)).toBe(visible)
+    expect(speechTextForProvider(reply, 'voicevox')).toBe(visible)
+    expect(speechTextForProvider(reply, 'kokoro-local')).toBe(visible)
+  })
+
+  it.each(['<|ACT {"emotion":{"name":"curious","intensity":0.7}}|>', '<|DELAY 2|>'])('hides complete and unfinished controls across every stream split: %s', (token) => {
+    const line = 'こんにちは。\n(Hello.)'
+    for (let split = 1; split <= token.length; split++) {
+      expect(speechCaption(`こんにちは。${token.slice(0, split)}`)).toBe('こんにちは。')
+      const speech = new JapaneseReplySpeech()
+      expect(speech.consume(token.slice(0, split)) + speech.consume(token.slice(split) + line)).toBe('こんにちは。\n')
+    }
+    expect(speechCaption(token + line + token)).toBe(line)
+    expect(speechTextForProvider(`${token}[prosody tone=plain]こんにちは。`, 'voicevox')).toBe('[prosody tone=plain]こんにちは。')
+  })
+
   it('hides complete and partial emotion metadata in captions', () => {
     const tag = '[emotion=curious]'
     const line = 'えっ、赤いね。\n(Whoa, it is red!)'
