@@ -78,6 +78,14 @@ describe('idle musing schedule', () => {
 })
 
 describe('idle musing replies', () => {
+  it.each(['ja', 'ja-en'] as const)('removes only the excluded call phrase from musings in %s mode', (language) => {
+    const reply = '[prosody tone=plain focus=]ねえ、静かだね。\n\n(It is quiet.)'
+    expect(normalizeIdleMusing(reply, language)).toBe('[prosody tone=plain focus=]静かだね。\n\n(It is quiet.)')
+    expect(normalizeIdleMusing('静かだね。ねえ、聞こえる？', language)).toBe('静かだね。聞こえる？')
+    expect(normalizeIdleMusing('ねえ？ね、静かだね。', language)).toBe('ねえ？ね、静かだね。')
+    expect(normalizeIdleMusing('ねえ、', language)).toBe('')
+  })
+
   it.each(['ja', 'ja-en'] as const)('rejects English dialogue and Japanese metadata in %s mode', (language) => {
     const english = 'Nothing exists here yet... but somehow that still feels like being free?'
     expect(normalizeIdleMusing(`${english}\n\n(${english})`, language)).toBe('')

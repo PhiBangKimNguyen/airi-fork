@@ -108,6 +108,7 @@ export function idleMusingInstruction(kind: SpokenIdleMusingKind, recent: string
     'Idle moment. Your friend is nearby but is not chatting, and no tab is shared.',
     'Break the silence out of the blue with exactly ONE short sentence.',
     'Use no greeting and no recap. Do not ask about their mood or what they are doing.',
+    'Do not use 「ねえ、」. Begin directly with the thought.',
     'Do not write humming, music notes, or ♪.',
     kindInstructions[kind],
     'Draw on what you know about your friend\'s tastes when it fits.',
@@ -124,7 +125,7 @@ export function idleMusingInstruction(kind: SpokenIdleMusingKind, recent: string
  * // => '何もないね。\n(Nothing here.)'
  */
 export function normalizeIdleMusing(text: string, replyLanguage?: 'ja' | 'ja-en'): string {
-  const reply = normalizeWatchingReply(text)
+  const reply = normalizeWatchingReply(text.replaceAll('ねえ、', ''))
   const dialogue = new JapaneseReplySpeech().consume(speechCaption(reply)).trim()
   if (replyLanguage && !/[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(dialogue)) {
     // Wrong-language output stays silent. The idle schedule retains its short retry interval.

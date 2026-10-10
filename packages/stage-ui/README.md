@@ -36,6 +36,8 @@ Disable viewing memory to stop collection. Forget viewing history to delete song
 Hybrid idle musings follow `VITE_LOCAL_REPLY_LANGUAGE`. The `ja` and `ja-en` modes explicitly request Japanese dialogue despite English prompts and recent captions.
 The orchestrator buffers each complete musing before captions and speech. English dialogue is rejected, and the idle schedule keeps its short retry interval.
 Bilingual musings retain one English caption. Expression markers remain available to the action parser and stay hidden in captions.
+The idle prompt excludes 「ねえ、」 because its voice sounds synthetic.
+The reply normalizer removes that exact phrase before captions and speech, even if the model includes it.
 
 ## Video reaction motions
 
