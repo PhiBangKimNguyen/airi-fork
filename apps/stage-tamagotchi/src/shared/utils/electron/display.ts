@@ -1,5 +1,15 @@
 import type { Rectangle } from 'electron'
 
+/**
+ * Rounds coordinates and sizes to integer pixels accepted by Electron. Negative zero becomes ordinary zero.
+ * @example
+ * wholePixels(-0.3)
+ * // => 0
+ */
+export function wholePixels(value: number) {
+  return Math.round(value) + 0
+}
+
 /** Display geometry that is safe to use in main and renderer processes. */
 export interface DisplayArea {
   /** Full bounds used to decide which display owns a cross-screen window. */

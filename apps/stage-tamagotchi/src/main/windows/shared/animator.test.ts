@@ -26,6 +26,21 @@ function waitForAnimation(): Promise<void> {
 }
 
 describe('window bounds animator', () => {
+  it('never passes negative zero to Electron while approaching the screen origin', async () => {
+    const window = createWindow({ x: -1, y: -1, width: 300, height: 400 })
+    const animator = new Animator(window)
+    animator.windowBoundsAnimateTo({ x: 0, y: 0, width: 300, height: 400 }, { duration: 100 })
+    await waitForAnimation()
+    animator.stop()
+    expect(window.setPosition).toHaveBeenCalled()
+    for (const [x, y] of window.setPosition.mock.calls) {
+      expect(Number.isInteger(x)).toBe(true)
+      expect(Number.isInteger(y)).toBe(true)
+      expect(Object.is(x, -0)).toBe(false)
+      expect(Object.is(y, -0)).toBe(false)
+    }
+  })
+
   it('animates position after it applies the target size', async () => {
     const window = createWindow({ x: 10, y: 20, width: 300, height: 400 })
     const animator = new Animator(window)

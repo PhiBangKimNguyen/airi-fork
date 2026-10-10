@@ -18,7 +18,7 @@ import { boolean, number, object, optional, record, string } from 'valibot'
 import icon from '../../../../resources/icon.png?asset'
 
 import { captionGetIsFollowingWindow, captionIsFollowingWindowChanged } from '../../../shared/eventa'
-import { clampBoundsWithinRect } from '../../../shared/utils/electron/display'
+import { clampBoundsWithinRect, wholePixels } from '../../../shared/utils/electron/display'
 import { baseUrl, getElectronMainDirname, load, withHashRoute } from '../../libs/electron/location'
 import { createConfig } from '../../libs/electron/persistence'
 import { createReusableWindow } from '../../libs/electron/window-manager'
@@ -206,8 +206,8 @@ export function setupCaptionWindowManager(params: {
           if (!Number.isFinite(state.x) || !Number.isFinite(state.y))
             return
 
-          const toX = Math.round(state.x)
-          const toY = Math.round(state.y)
+          const toX = wholePixels(state.x)
+          const toY = wholePixels(state.y)
           lastProgrammaticMoveAt = Date.now()
           win.setPosition(toX, toY)
         },

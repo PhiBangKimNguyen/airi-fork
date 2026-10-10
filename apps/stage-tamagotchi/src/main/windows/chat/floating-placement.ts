@@ -4,7 +4,7 @@ import type { DisplayArea } from '../../../shared/utils/electron/display'
 
 import { clamp } from 'es-toolkit'
 
-import { clampBoundsWithinRect, findDominantDisplayArea } from '../../../shared/utils/electron/display'
+import { clampBoundsWithinRect, findDominantDisplayArea, wholePixels } from '../../../shared/utils/electron/display'
 
 /**
  * Room an attached chat needs beyond a fit before it returns to the preferred
@@ -89,20 +89,6 @@ export function attachedChatOffset(
     x: clamp(x, workArea.x, workArea.x + workArea.width - size.width) - main.x,
     y: clamp(y, workArea.y, workArea.y + workArea.height - size.height) - main.y,
   }
-}
-
-/**
- * Rounds a window coordinate or size to what `BrowserWindow.setPosition` and
- * `setBounds` accept. They reject fractions and negative zero, and
- * `Math.round(-0.3)` is negative zero.
- *
- * @example
- * wholePixels(-0.3)
- * // => 0
- */
-export function wholePixels(value: number) {
-  // Adding 0 turns -0 into 0.
-  return Math.round(value) + 0
 }
 
 /**

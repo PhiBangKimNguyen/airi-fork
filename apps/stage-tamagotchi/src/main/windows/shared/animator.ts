@@ -2,6 +2,8 @@ import type { BrowserWindow, Rectangle } from 'electron'
 
 import { animate, utils } from 'animejs'
 
+import { wholePixels } from '../../../shared/utils/electron/display'
+
 type AnimatableWindow = Pick<BrowserWindow, 'getBounds' | 'isDestroyed' | 'setPosition' | 'setSize'>
 
 /** Options for one window bounds animation. */
@@ -42,7 +44,7 @@ export class Animator {
       modifier: utils.round(0),
       onRender: () => {
         if (!this.window.isDestroyed())
-          this.window.setPosition(Math.round(state.x), Math.round(state.y))
+          this.window.setPosition(wholePixels(state.x), wholePixels(state.y))
       },
     })
   }

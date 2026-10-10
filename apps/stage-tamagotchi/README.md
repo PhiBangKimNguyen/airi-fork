@@ -8,6 +8,10 @@ Shared character behavior belongs in `packages/stage-ui`. Use `stage-web` for br
 From the repository root, run `pnpm install`, then `pnpm dev:tamagotchi`.
 Run `pnpm -F @proj-airi/stage-tamagotchi build` to build the app.
 
+Window animations use shared integer coordinates without negative zero. Electron rejects negative zero when setting a window position.
+When launching the hybrid app directly, set `APP_USER_DATA_PATH` to `.local/hybrid-user-data` to retain its existing profile.
+Keep the renderer origin unchanged. Development and compiled launches use separate browser storage even within the same profile directory.
+
 ## Hybrid Cloudflare accounts
 
 The hybrid gateway reads `AIRI_KEYS_ENV`, including the existing SillyTavern `.env` file.
