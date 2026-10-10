@@ -11,6 +11,7 @@ import { loadEnv } from 'vite'
 import { defineConfig } from 'vitest/config'
 
 import { sharedUnoConfig } from '../../uno.config'
+import { FuriganaDictionary } from './src/plugins/furigana'
 
 export default defineConfig({
   root: import.meta.dirname,
@@ -30,6 +31,7 @@ export default defineConfig({
     ],
   },
   plugins: [
+    FuriganaDictionary(),
     Info(),
     // Use the app's route-block transform when browser tests mount shared pages.
     VueRouter({ routesFolder: [], dts: false }),

@@ -1,4 +1,4 @@
-import type { Cubism4InternalModel, InternalModel } from 'pixi-live2d-display/cubism4'
+import type { Cubism4InternalModel, InternalModel } from 'pixi-live2d-display'
 import type { Ref } from 'vue'
 
 import type { Live2DBreathControlState, Live2DMotionControlState } from '../../stores/motion-control'

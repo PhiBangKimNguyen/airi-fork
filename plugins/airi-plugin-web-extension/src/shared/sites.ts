@@ -1,9 +1,26 @@
 import type { VideoSite } from './types'
 
+/** An explicit tab share may follow HTTPS YouTube videos, but never a sign-in page, other site, or new tab. */
+export function canFollowYouTubeVideo(previous: string, next: string) {
+  const video = (value: string) => {
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' && ['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(url.hostname)
+        && ((url.pathname === '/watch' && /^[\w-]{6,64}$/.test(url.searchParams.get('v') ?? '')) || /^\/shorts\/[\w-]{6,64}$/.test(url.pathname))
+    }
+    catch {
+      return false
+    }
+  }
+  return video(previous) && video(next)
+}
+
 export function detectSiteFromUrl(url: string): VideoSite {
   try {
     const parsed = new URL(url)
     const host = parsed.hostname
+    if (host === 'reddit.com' || host.endsWith('.reddit.com'))
+      return 'reddit'
     if (host.includes('youtube.com') || host.includes('youtu.be'))
       return 'youtube'
     if (host.includes('bilibili.com') || host.includes('b23.tv'))

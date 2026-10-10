@@ -5,8 +5,9 @@ import { extensions } from '@pixi/extensions'
 import { Sprite } from '@pixi/sprite'
 import { Ticker, TickerPlugin } from '@pixi/ticker'
 import { coverRect } from '@proj-airi/stage-shared'
-import { Live2DModel } from 'pixi-live2d-display/cubism4'
 import { onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+
+import { Live2DModel } from '../../../utils/live2d-runtime'
 
 const props = withDefaults(defineProps<{
   width: number

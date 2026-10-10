@@ -13,6 +13,7 @@ const regexpAnySingleDigit = /\d/
 
 const keptPunctuations = new Set('?？!！')
 const hardPunctuations = new Set('.。?？!！…⋯～~\n\t\r')
+const japaneseSentencePunctuations = new Set('。?？!！\n\r')
 const softPunctuations = new Set(',，、–—:：;；《》「」')
 
 export interface TtsInputChunk {
@@ -32,6 +33,12 @@ export interface TtsInputChunkOptions {
    * @default 2
    */
   boost?: number
+  /**
+   * Japanese sentences retain commas, elongated vowels, and hesitation marks.
+   * Word limits and opening boosts do not split these sentences. Explicit flush and special tokens still apply.
+   * @default undefined
+   */
+  sentenceMode?: 'japanese'
   /**
    * Word count a chunk must reach before a boost or a length limit may end it.
    *
@@ -59,6 +66,9 @@ export async function* chunkTtsInput(
     minimumWords = 4,
     maximumWords = 12,
   } = options ?? {}
+
+  const sentenceMode = options?.sentenceMode === 'japanese'
+  const punctuation = sentenceMode ? japaneseSentencePunctuations : hardPunctuations
 
   const iterator = readGraphemeClusters(
     typeof input === 'string'
@@ -91,7 +101,7 @@ export async function* chunkTtsInput(
 
     const flush = value === TTS_FLUSH_INSTRUCTION
     const special = value === TTS_SPECIAL_TOKEN
-    const hard = hardPunctuations.has(value)
+    const hard = punctuation.has(value)
     const soft = softPunctuations.has(value)
     const kept = keptPunctuations.has(value)
     let next: IteratorResult<string, void> | undefined
@@ -142,7 +152,7 @@ export async function* chunkTtsInput(
 
       const words = [...segmenter.segment(buffer)].filter(w => w.isWordLike)
 
-      if (chunkWordsCount > minimumWords && chunkWordsCount + words.length > maximumWords) {
+      if (!sentenceMode && chunkWordsCount > minimumWords && chunkWordsCount + words.length > maximumWords) {
         const text = kept ? chunk.trim() + value : chunk.trim()
         yield {
           text,
@@ -171,7 +181,7 @@ export async function* chunkTtsInput(
       }
       // A boost chunk ends early at soft punctuation only once it is long enough to be worth its
       // own TTS request. A shorter opening clause stays in the chunk and joins the next one.
-      else if (flush || hard || chunkWordsCount > maximumWords || (yieldCount < boost && chunkWordsCount >= minimumWords)) {
+      else if (flush || hard || (!sentenceMode && (chunkWordsCount > maximumWords || (yieldCount < boost && chunkWordsCount >= minimumWords)))) {
         const text = chunk.trim()
         yield {
           text,

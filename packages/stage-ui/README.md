@@ -2,6 +2,85 @@
 
 Shared core for stage
 
+## Japanese reading aids
+
+Assistant chat replies and desktop captions show hiragana above known kanji through native ruby annotations.
+User messages, code blocks, inline code, mathematical formulas, and existing ruby annotations stay unchanged.
+The original reply remains in message storage, copy actions, model context, and speech requests. Speech never receives display readings.
+Kuroshiro and Kuromoji generate readings locally. No additional model request or external reading service runs.
+The dictionary loads lazily when kanji first appear. Unknown words retain their original text without an invented reading.
+Dictionary readings can differ from the intended pronunciation of names or ambiguous words.
+Replies appear immediately. Readings follow a short pause in streaming updates. A dictionary failure retains the original display.
+The `FuriganaDictionary` Vite plugin serves development assets and bundles all dictionary files and redistribution notices for offline builds.
+Register it in each renderer host. `MarkdownRenderer` enables reading aids through its `furigana` prop. `FuriganaText` accepts plain caption text.
+
+## Vue DevTools in settings
+
+The web and Electron developer settings pages host the Vue DevTools launcher during development.
+The launcher stays hidden on the character stage. Its inspection panel retains the plugin controls.
+`VueDevtools` moves the plugin root into settings and returns it to the hidden body location when settings close.
+
+## Collected music memory
+
+`MediaWatchMemory` stores explicitly shared YouTube playback in the local profile, with a limit of 200 videos.
+`MediaWatchPlaylist` shows candidate songs, links to watched versions, and genre evidence under the desktop's local viewing memory controls.
+Song identity uses Unicode title matching. Version labels remain available for commentary.
+Explicit artist conflicts prevent homonymous songs from merging. Declared adaptations can use different performers.
+Genre summaries count engaged songs once per genre. Title and audio evidence supply tentative labels, and absent evidence stays unknown.
+Song comparisons and genre commentary route locally. They never enter the approved cloud habit projection.
+Use this memory for shared playback habits. It does not fingerprint audio or import a YouTube account playlist.
+Disable viewing memory to stop collection. Forget viewing history to delete songs, genre evidence, and remembered comments.
+
+## Idle musing language
+
+Hybrid idle musings follow `VITE_LOCAL_REPLY_LANGUAGE`. The `ja` and `ja-en` modes explicitly request Japanese dialogue despite English prompts and recent captions.
+The orchestrator buffers each complete musing before captions and speech. English dialogue is rejected, and the idle schedule keeps its short retry interval.
+Bilingual musings retain one English caption. Expression markers remain available to the action parser and stay hidden in captions.
+The idle prompt excludes 「ねえ、」 because its voice sounds synthetic.
+The reply normalizer removes that exact phrase before captions and speech, even if the model includes it.
+
+## Video reaction motions
+
+Media replies validate quoted work names against supplied titles before captions, speech, or saved comments.
+Cyrillic names retain their supplied spelling. The approved English name for `イブの記憶` remains `Ib's Memory`.
+Replay claims require a matching session playback count. Viewing visits, days, versions, and listening duration cannot establish that count.
+Invalid replies are discarded as a complete bilingual pair. Rejected habit replies retain their allowance for a later attempt.
+Previous generated comments remain available for duplicate suppression. They are excluded from later media and habit prompts.
+
+Video and viewing-habit replies choose an emotion cue with their spoken reaction.
+The media boundary removes `[emotion=NAME]` before duplicate checks, captions, and speech.
+It removes cues from any reply position. The first cue controls the gesture, and repeated cues remain hidden.
+Caption filtering also hides incomplete emotion tags during streaming.
+Bilingual replies retain one English caption, including when emotion or prosody tags follow an embedded draft translation.
+Watching replies retain the first completed Japanese/English pair. Consecutive English revisions replace its caption.
+Later Japanese paragraphs and English commentary are discarded before duplicate checks, captions, and speech.
+The retained dialogue still obeys the spoken length limit. An overlong first reply remains silent.
+Reasoning blocks remain hidden during streaming. An orphan closing reasoning tag discards the malformed continuation after it.
+Captions and speech text hide ACT, DELAY, and other playback controls, including unfinished streamed markers.
+The marker parser retains ownership of playback actions and delays.
+English captions use the requested title “Ib's Memory” for イブの記憶. Japanese dialogue and unrelated song titles remain unchanged.
+Empty Japanese quotation marks disappear before captions and speech. Quoted song titles remain intact.
+The speech intent carries an ACT token through the existing Eventa bus.
+The stage applies the cue once when that reply starts playback. Failed or canceled speech discards the cue.
+Automatic reactions call the scene directly without changing the persisted motion selection.
+An identical active motion continues. After it finishes, the same cue can play it again.
+
+AK-Alfa archives with an `akalfa`, `ak-alfa`, or `ak_alfa` file name use their authored touch motions.
+The profile maps the five authored motions to these cues:
+
+| Reaction | Motion |
+| --- | --- |
+| Bashful | `touch_1.mtn` |
+| Dreamy or zoned out | `touch_2.mtn` |
+| Surprised | `touch_3.mtn` |
+| Delighted | `touch_4.mtn` |
+| Curious | `touch_5.mtn` |
+
+The internal `think` cue selects the dreamy animation. It does not select anger or protest.
+Motion file names determine the loaded group and index. Other models retain their existing emotion handling.
+Neutral reactions send no new gesture. Silence and repeated replies trigger no new motion.
+Login, wedding, and wait animations remain manual.
+
 ## Experimental features
 
 Register flags in `libs/feature-flags.ts`. Read their state through `useFeatureFlagsStore().isEnabled(key)`.

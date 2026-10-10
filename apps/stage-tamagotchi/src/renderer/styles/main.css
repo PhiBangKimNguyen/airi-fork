@@ -1,6 +1,11 @@
 @import '@proj-airi/ui/main.css';
 @import './transitions.css';
 
+/* The settings developer page hosts the Vue DevTools launcher. */
+body > #__vue-devtools-container__ {
+  display: none !important;
+}
+
 html,
 body,
 #app {

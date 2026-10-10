@@ -186,6 +186,21 @@ describe('vOICEVOX speech provider', () => {
     expect(Array.from(new Uint8Array(audio))).toEqual([82, 73, 70, 70])
   })
 
+  it.each(['original', 'j'] as const)('keeps %s prosody through configuration parsing and speech generation', async (prosody) => {
+    const calls = installEngine()
+    const config = z.parse(await providerVoicevox.createProviderConfig({ t: translate }), {
+      baseUrl: 'http://localhost:50021/',
+      voiceSettings: { prosody, speed: 0.9 },
+    })
+    const provider = await providerVoicevox.createProvider(config) as SpeechProvider
+
+    await generateSpeech({ ...provider.speech('default'), input: 'こんにちは。', voice: '8' })
+
+    expect(calls[0].url.searchParams.get('airi_prosody')).toBe(prosody)
+    expect(calls[0].url.searchParams.get('speaker')).toBe('8')
+    expect(JSON.parse(String(calls[1].init.body))).toMatchObject({ speedScale: 0.9 })
+  })
+
   it('refuses to synthesize without a selected voice', async () => {
     installEngine()
     const provider = await providerVoicevox.createProvider({ baseUrl: 'http://localhost:50021/' }) as SpeechProvider

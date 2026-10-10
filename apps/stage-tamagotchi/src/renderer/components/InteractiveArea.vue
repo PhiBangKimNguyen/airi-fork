@@ -11,6 +11,7 @@ import { useChatInterruption } from '@proj-airi/stage-layouts/composables/use-ch
 import { ChatHistory, HearingConfigDialog, JournalPreviewModal } from '@proj-airi/stage-ui/components'
 import { ChatImageAttachmentPreview, ChatReplyPreview, useChatComposer, useChatImages } from '@proj-airi/stage-ui/components/scenarios/chat'
 import { useAnalytics } from '@proj-airi/stage-ui/composables/use-analytics'
+import { hybridEnabled } from '@proj-airi/stage-ui/libs/privacy-routing'
 import { useBackgroundStore } from '@proj-airi/stage-ui/stores/background'
 import { useChatStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
@@ -19,6 +20,7 @@ import { useJournalPreviewStore } from '@proj-airi/stage-ui/stores/journal-previ
 import { useAiriCardStore } from '@proj-airi/stage-ui/stores/modules/airi-card'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
+import { usePrivacyRoutingStore } from '@proj-airi/stage-ui/stores/privacy-routing'
 import { useSettingsAudioDevice } from '@proj-airi/stage-ui/stores/settings'
 import { BasicButton, BasicTextarea, Callout, GhostButton } from '@proj-airi/ui'
 import { until, useLocalStorage } from '@vueuse/core'
@@ -30,6 +32,7 @@ import { useI18n } from 'vue-i18n'
 
 import JournalToolCallBlock from './chat-tool-renderers/journal-tool-call-block.vue'
 import ChatViewportLayout from './chat-viewport-layout.vue'
+import HybridProviderPicker from './hybrid-provider-picker.vue'
 
 import { electronOpenSettings } from '../../shared/eventa'
 import { useHearingInputChannel } from '../composables/use-hearing-input-channel'
@@ -69,7 +72,9 @@ const viewportLayout = useTemplateRef<InstanceType<typeof ChatViewportLayout>>('
 const messageComposer = useTemplateRef<HTMLDivElement>('message-composer')
 const lastEnterTime = ref(0)
 // Each request captures this composer selection, including retries and tool reruns.
-const computerUseEnabled = ref(true)
+const computerUseEnabled = ref(!hybridEnabled)
+const privacyRouting = hybridEnabled ? usePrivacyRoutingStore() : undefined
+const machineDerivedDraft = ref(false)
 const hearingDialogOpen = shallowRef(false)
 
 const chatStore = useChatStore()
@@ -90,17 +95,22 @@ const openSettings = useElectronEventaInvoke(electronOpenSettings)
 
 const composer = useChatComposer<ChatImageAttachment>({
   activeSessionId,
-  send: submission => chatStore.send({
-    sessionId: submission.sessionId,
-    text: submission.text,
-    replyToMessageId: submission.replyToMessageId,
-    attachments: submission.attachments.map(attachment => ({
-      type: attachment.type,
-      data: attachment.data,
-      mimeType: attachment.mimeType,
-    })),
-    tools: computerUseEnabled.value ? [...artistryToolReferences, ...computerUseToolReferences] : artistryToolReferences,
-  }),
+  send: async (submission) => {
+    const result = await chatStore.send({
+      cloudSafeText: !machineDerivedDraft.value,
+      sessionId: submission.sessionId,
+      text: submission.text,
+      replyToMessageId: submission.replyToMessageId,
+      attachments: submission.attachments.map(attachment => ({
+        type: attachment.type,
+        data: attachment.data,
+        mimeType: attachment.mimeType,
+      })),
+      tools: computerUseEnabled.value ? [...artistryToolReferences, ...computerUseToolReferences] : hybridEnabled ? [] : artistryToolReferences,
+    })
+    machineDerivedDraft.value = false
+    return result
+  },
 })
 const {
   attachments,
@@ -112,6 +122,10 @@ const {
   selectReply,
 } = composer
 const { addFiles: handleFilePaste, selectFiles: handleFileSelect, error: imageError, pending: pendingImages } = useChatImages(composer, () => activeSessionId.value)
+watch(messageInput, () => {
+  if (microphoneEnabled.value)
+    machineDerivedDraft.value = true
+})
 useHearingInputChannel(messageInput)
 const { t } = useI18n()
 const { openImagePreview } = journalPreviewStore
@@ -325,6 +339,7 @@ async function restoreDraft(draft: ChatDraftHandover): Promise<boolean> {
 
   // The carried content must stay in sight, so a folded composer opens.
   composerFolded.value = false
+  machineDerivedDraft.value = true
   messageInput.value = draft.text
   if (draft.replyTarget)
     selectReply(draft.replyTarget)
@@ -503,6 +518,7 @@ defineExpose({
           {{ t('stage.chat.images.reading') }}
         </p>
         <div :class="['w-full shrink-0 overflow-hidden bg-transparent']">
+          <HybridProviderPicker v-if="privacyRouting" />
           <ChatReplyPreview
             :target="replyTarget"
             @cancel="handleCancelReply"
@@ -521,6 +537,8 @@ defineExpose({
             @compositionstart="isComposing = true"
             @compositionend="isComposing = false"
             @keydown="handleMessageInputKeydown"
+            @paste.capture="machineDerivedDraft = true"
+            @drop.capture="machineDerivedDraft = true"
             @paste-file="handleFilePaste"
           />
         </div>

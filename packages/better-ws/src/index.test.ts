@@ -1468,6 +1468,10 @@ describe('better-ws client runtime', () => {
     })
 
     await client.connect()
+    // Frequent observations cannot postpone the first strict heartbeat before any ping is sent.
+    serverMessage?.('not-pong')
+    expect(scheduled).toHaveLength(1)
+    expect(scheduled[0]?.cancel).not.toHaveBeenCalled()
     scheduled[0]?.run()
     serverMessage?.('not-pong')
 

@@ -8,6 +8,7 @@ import { artistrySyncConfig } from '@proj-airi/stage-shared'
 import { ToasterRoot } from '@proj-airi/stage-ui/components'
 import { useInferencePreload } from '@proj-airi/stage-ui/composables'
 import { usePiniaSynced } from '@proj-airi/stage-ui/libs/pinia'
+import { hybridEnabled } from '@proj-airi/stage-ui/libs/privacy-routing'
 import { initializeAnalytics } from '@proj-airi/stage-ui/libs/product-signals'
 import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useCharacterOrchestratorStore } from '@proj-airi/stage-ui/stores/character'
@@ -34,6 +35,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { toast, Toaster } from 'vue-sonner'
 
+import HybridReactionCaption from './components/hybrid-reaction-caption.vue'
 import ResizeHandler from './components/ResizeHandler.vue'
 
 import {
@@ -66,6 +68,7 @@ import { initializeElectronAuthCallbackBridge } from './bridges/electron-auth-ca
 import { initializeIOTraceRecordingBridge } from './bridges/io-trace-recording'
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useLanguage } from './composables/use-language'
+import { initializeHybridVoice } from './modules/hybrid'
 import { useServerChannelSettingsStore } from './stores/settings/server-channel'
 import { useStageWindowLifecycleStore } from './stores/stage-window-lifecycle'
 import {
@@ -199,7 +202,7 @@ function createFullStageRuntime() {
   initializeElectronAuthCallbackBridge()
   void stageWindowLifecycleStore.initializeWindowLifecycleBridge()
 
-  contextBridgeStore.setSparkNotifyHostRole(isWidgetsWindow ? 'client' : 'main')
+  contextBridgeStore.setSparkNotifyHostRole(isWidgetsWindow || isSettingsWindow ? 'client' : 'main')
 
   // NOTICE: register plugin host bridge during setup to avoid race with pages using it in immediate watchers.
   pluginHostInspectorStore.setBridge({
@@ -274,6 +277,9 @@ function createFullStageRuntime() {
       if (!authStore.isAuthenticated)
         await removeAuthenticationProviderConfiguration()
 
+      if (syncedPinia.isLeader())
+        await initializeHybridVoice()
+
       await displayModelsStore.loadDisplayModelsFromIndexedDB()
       await settingsStore.initializeStageModel()
       await settingsAudioDeviceStore.initialize()
@@ -297,7 +303,7 @@ function createFullStageRuntime() {
         possibleEvents: ['ui:configure'],
       }).catch(err => console.error('Failed to initialize Mods Server Channel in App.vue:', err))
       contextBridgeStore.initialize()
-      if (!isWidgetsWindow) {
+      if (!isWidgetsWindow && !isSettingsWindow) {
         characterOrchestratorStore.initialize()
       }
 
@@ -383,6 +389,7 @@ onUnmounted(() => {
   </ToasterRoot>
   <ResizeHandler v-if="!isSpotlightWindow && !isFloatingChatWindow" />
   <RouterView />
+  <HybridReactionCaption v-if="hybridEnabled && route.path === '/'" />
 </template>
 
 <style>

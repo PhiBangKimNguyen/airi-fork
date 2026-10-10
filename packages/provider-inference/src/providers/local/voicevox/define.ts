@@ -44,6 +44,7 @@ const SENTINEL_BASE_URL = 'http://voicevox-family.invalid/v1/'
 const voicevoxVoiceSettingsSchema = z.object({
   intonation: z.number().default(1),
   pitch: z.number().default(0),
+  prosody: z.enum(['original', 'j']).optional(),
   speed: z.number().default(1),
   volume: z.number().default(1),
 })

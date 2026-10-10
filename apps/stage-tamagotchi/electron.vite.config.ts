@@ -14,6 +14,7 @@ import VueMacros from 'vue-macros/vite'
 import VueRouter from 'vue-router/vite'
 
 import { paraformerBilingualZhEn, xAsrBilingualZhEnInt8, zipformerMultilingual } from '@proj-airi/provider-inference/sherpaw-transcription/models'
+import { FuriganaDictionary } from '@proj-airi/stage-ui/plugins/furigana'
 import { Download } from '@proj-airi/unplugin-fetch'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk'
 import { Sherpaw } from '@proj-airi/vite-plugin-sherpaw'
@@ -21,7 +22,10 @@ import { defineConfig } from 'electron-vite'
 
 const stageUIAssetsRoot = resolve(join(import.meta.dirname, '..', '..', 'packages', 'stage-ui', 'src', 'assets'))
 const sharedCacheDir = resolve(join(import.meta.dirname, '..', '..', '.cache'))
-const sherpawModels = [paraformerBilingualZhEn, zipformerMultilingual, xAsrBilingualZhEnInt8]
+// Hybrid mode downloads ASR models only when local hearing is explicitly enabled.
+const sherpawModels = env.AIRI_HYBRID_ENABLED === 'true' && env.AIRI_ENABLE_LOCAL_ASR !== 'true'
+  ? []
+  : [paraformerBilingualZhEn, zipformerMultilingual, xAsrBilingualZhEnInt8]
 
 export default defineConfig({
   main: {
@@ -190,6 +194,7 @@ export default defineConfig({
     },
 
     plugins: [
+      FuriganaDictionary(),
       Info(),
 
       {

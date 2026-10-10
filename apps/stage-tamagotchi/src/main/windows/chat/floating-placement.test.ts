@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { attachedChatOffset, chooseAttachedChatLayout, keepChatOnDisplay, preferredAttachedChatLayout, wholePixels } from './floating-placement'
+import { wholePixels } from '../../../shared/utils/electron/display'
+import { attachedChatOffset, chooseAttachedChatLayout, keepChatOnDisplay, preferredAttachedChatLayout } from './floating-placement'
 
 const workArea = { x: 0, y: 25, width: 1920, height: 1055 }
 const chatSize = { width: 360, height: 520 }

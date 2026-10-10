@@ -1,6 +1,7 @@
 import type { Eventa } from '@moeru/eventa'
 
 import type { SpeechPipelineEventName } from './eventa'
+import type { TtsInputChunkOptions } from './processors/tts-chunker'
 import type {
   IntentHandle,
   IntentOptions,
@@ -41,7 +42,9 @@ export interface SpeechPipelineOptions<TAudio> {
   }
   logger?: LoggerLike
   priority?: ReturnType<typeof createPriorityResolver>
-  segmenter?: (tokens: ReadableStream<TextToken>, meta: { streamId: string, intentId: string, turnId?: string }) => ReadableStream<TextSegment>
+  /** Options reach the segmenter for every intent. @default undefined */
+  segmenterOptions?: TtsInputChunkOptions
+  segmenter?: (tokens: ReadableStream<TextToken>, meta: { streamId: string, intentId: string, turnId?: string }, options?: TtsInputChunkOptions) => ReadableStream<TextSegment>
 }
 
 interface IntentState {
@@ -130,7 +133,7 @@ export function createSpeechPipeline<TAudio>(options: SpeechPipelineOptions<TAud
       context.emit(speechPipelineEventMap.onTurnStart, intent.turnId)
 
     const tokenStream = intent.stream
-    const segmentStream = segmenter(tokenStream, { streamId: intent.streamId, intentId: intent.intentId, turnId: intent.turnId })
+    const segmentStream = segmenter(tokenStream, { streamId: intent.streamId, intentId: intent.intentId, turnId: intent.turnId }, options.segmenterOptions)
     const completedRequests = new Map<number, TtsResult<TAudio> | null>()
     const inFlightTasks = new Set<Promise<void>>()
     let nextRequestSequence = 0

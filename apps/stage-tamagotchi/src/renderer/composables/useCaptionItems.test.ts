@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { useCaptionItems } from './useCaptionItems'
 
 describe('useCaptionItems', () => {
-  it('expires each caption event without cancelling earlier events of the same type', () => {
+  it('keeps the full bubble until the last caption update expires', () => {
     vi.useFakeTimers()
 
     try {
@@ -17,10 +17,31 @@ describe('useCaptionItems', () => {
 
       vi.advanceTimersByTime(500)
 
-      expect(captions.items.value.map(item => item.text)).toEqual(['second'])
+      expect(captions.items.value.map(item => item.text)).toEqual(['first', 'second'])
 
       vi.advanceTimersByTime(500)
 
+      expect(captions.items.value).toEqual([])
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('uses ten seconds of inactivity, renews on either speaker, and clears timers on disposal', () => {
+    vi.useFakeTimers()
+    try {
+      const captions = useCaptionItems()
+      captions.add({ type: 'caption-assistant', text: '日本語\n\n(English)' })
+      vi.advanceTimersByTime(9000)
+      captions.add({ type: 'caption-speaker', text: 'A reply' })
+      vi.advanceTimersByTime(9999)
+      expect(captions.items.value).toHaveLength(2)
+      vi.advanceTimersByTime(1)
+      expect(captions.items.value).toEqual([])
+      captions.add({ type: 'caption-assistant', text: 'Another reply' })
+      captions.dispose()
+      expect(vi.getTimerCount()).toBe(0)
       expect(captions.items.value).toEqual([])
     }
     finally {

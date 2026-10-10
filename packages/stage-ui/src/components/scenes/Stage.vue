@@ -37,8 +37,10 @@ import { useIOTraceBridge } from '../../composables/use-io-trace-bridge'
 import { initIOTracer } from '../../composables/use-io-tracer'
 import { Emotion, EMOTION_EmotionMotionName_value, EMOTION_VRMExpressionName_value, EmotionThinkMotionName } from '../../constants/emotions'
 import { live2dMotionMagicProfiles, useLive2DMotionMagic, useLive2DMotionMagicSettings } from '../../features/motions/live2d'
+import { resolveLive2DReactionMotion } from '../../features/motions/live2d/reaction-motion'
 import { getDefinedProvider } from '../../libs/providers/providers'
 import { OFFICIAL_SPEECH_PROVIDER_ID, OFFICIAL_SPEECH_STREAMING_PROVIDER_ID } from '../../libs/providers/providers/official'
+import { speechCaption, speechTextForProvider } from '../../libs/speech/japanese-reply-speech'
 import { bindSpeakingStateToPlaybackManager } from '../../libs/speech/playback-speaking-state'
 import { createStageTtsSession } from '../../libs/speech/tts-session'
 import { getSpeechBusContext, speechOutputGetPlaybackState } from '../../services/speech/bus'
@@ -46,6 +48,7 @@ import { useLlmStreamingControlStore } from '../../stores/ai/chat-llm/streaming-
 import { useAudioContext, useSpeakingStore } from '../../stores/audio'
 import { useBackgroundStore } from '../../stores/background'
 import { useChatStore } from '../../stores/chat'
+import { useDisplayModelsStore } from '../../stores/display-models'
 import { useAiriCardStore } from '../../stores/modules'
 import { useSpeechStore } from '../../stores/modules/speech'
 import { useSettingsPresenceBubble } from '../../stores/presence-bubble'
@@ -268,7 +271,10 @@ const speechRuntimeStore = useSpeechRuntimeStore()
 const backgroundStore = useBackgroundStore()
 const { activeBackgroundUrl } = storeToRefs(backgroundStore)
 
-const { currentMotion } = storeToRefs(useLive2dParams())
+const { currentMotion, availableMotions } = storeToRefs(useLive2dParams())
+const { displayModels } = storeToRefs(useDisplayModelsStore())
+// Media cues wait for their own speech playback. Failed or cancelled speech discards them.
+const pendingReactionEmotions = new Map<string, EmotionPayload>()
 
 const emotionsQueue = createQueue<EmotionPayload>({
   handlers: [
@@ -282,7 +288,15 @@ const emotionsQueue = createQueue<EmotionPayload>({
         await vrmViewerRef.value!.setExpression(value, ctx.data.intensity)
       }
       else if (stageModelRenderer.value === 'live2d') {
-        currentMotion.value = { group: EMOTION_EmotionMotionName_value[ctx.data.name] }
+        if (props.paused || componentState.value !== 'mounted')
+          return
+        const selected = displayModels.value.find(model => model.id === stageModelSelected.value)
+        const modelName = selected?.type === 'file' ? selected.file.name : selected?.name ?? ''
+        const motion = resolveLive2DReactionMotion(modelName, availableMotions.value, ctx.data.name)
+        if (motion)
+          await live2dSceneRef.value?.setMotion(motion.group, motion.index)
+        else
+          currentMotion.value = { group: EMOTION_EmotionMotionName_value[ctx.data.name] }
       }
       else if (stageModelRenderer.value === 'spine') {
         spineSceneRef.value?.setEmotion(ctx.data.name, ctx.data.intensity)
@@ -324,7 +338,7 @@ function toStageEmotionPayload(payload: { name: string, intensity: number }): Em
   }
 }
 
-chatHookCleanups.push(streamingControl.onSignal(async (signal) => {
+chatHookCleanups.push(streamingControl.onSignal(async (signal, context) => {
   if (signal.type === 'act') {
     const act = normalizeActPayload(signal.payload)
     if (act.motion && stageModelRenderer.value === 'live2d') {
@@ -338,7 +352,10 @@ chatHookCleanups.push(streamingControl.onSignal(async (signal) => {
 
       // eslint-disable-next-line no-console
       console.debug('emotion detected', emotion)
-      emotionsQueue.enqueue(emotion)
+      if (context.turnId?.startsWith('spark:'))
+        pendingReactionEmotions.set(context.turnId, emotion)
+      else
+        emotionsQueue.enqueue(emotion)
     }
     return
   }
@@ -454,6 +471,9 @@ function resolveStageVoiceType(): 'official_selected' | 'custom_configured' {
 }
 
 const speechPipeline = createSpeechPipeline<AudioBuffer>({
+  segmenterOptions: import.meta.env.VITE_AIRI_HYBRID_ENABLED === 'true' && import.meta.env.VITE_LOCAL_REPLY_LANGUAGE === 'ja-en'
+    ? { sentenceMode: 'japanese' }
+    : undefined,
   tts: async (request, signal) => {
     if (signal.aborted)
       return null
@@ -490,7 +510,10 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
       return null
     }
 
-    if (!request.text && !request.special)
+    // Only the AIRI local VOICEVOX server reads the prosody tag. Other providers would speak it.
+    // A segment that held only the tag has nothing to speak.
+    const text = speechTextForProvider(request.text, activeSpeechProvider.value)
+    if (!text && (request.text || !request.special))
       return null
 
     const providerConfig = providerStore.getProviderConfig(activeSpeechProvider.value)
@@ -542,7 +565,7 @@ const speechPipeline = createSpeechPipeline<AudioBuffer>({
 
     try {
       const speechRequest = speechStore.resolveSpeechInput({
-        text: request.text,
+        text,
         voice,
         providerConfig: {
           ...providerConfig,
@@ -610,10 +633,12 @@ speechPipeline.on('onSpecial', (segment) => {
 })
 
 speechPipeline.on('onTurnEnd', (turnId) => {
+  pendingReactionEmotions.delete(turnId)
   streamingControl.completeTurn(turnId)
 })
 
 speechPipeline.on('onTurnCancel', ({ turnId }) => {
+  pendingReactionEmotions.delete(turnId)
   streamingControl.cancelTurn(turnId)
 })
 
@@ -630,18 +655,24 @@ bindSpeakingStateToPlaybackManager(playbackManager, {
       nowSpeaking.value = true
   },
   onStart: ({ item }) => {
+    const emotion = item.turnId ? pendingReactionEmotions.get(item.turnId) : undefined
+    if (emotion && item.turnId) {
+      pendingReactionEmotions.delete(item.turnId)
+      emotionsQueue.enqueue(emotion)
+    }
     // NOTICE: postCaption and postPresent may throw errors if the BroadcastChannel is closed
     // (e.g., when navigating away from the page). We wrap these in try-catch to prevent
     // breaking playback when the channel is unavailable.
-    assistantCaption.value += ` ${item.text}`
+    const text = speechCaption(item.text)
+    assistantCaption.value += ` ${text}`
     try {
-      postCaption({ type: 'caption-assistant', text: item.text })
+      postCaption({ type: 'caption-assistant', text })
     }
     catch {
       // BroadcastChannel may be closed - don't break playback
     }
     try {
-      postPresent({ type: 'assistant-append', text: item.text })
+      postPresent({ type: 'assistant-append', text })
     }
     catch {
       // BroadcastChannel may be closed - don't break playback
@@ -1020,6 +1051,7 @@ async function captureCharacterFrame() {
 }
 
 onUnmounted(() => {
+  pendingReactionEmotions.clear()
   disposePlaybackStateHandler()
   resetLive2dLipSync()
   chatHookCleanups.forEach(dispose => dispose?.())

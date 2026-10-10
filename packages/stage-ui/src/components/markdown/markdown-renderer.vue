@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import DOMPurify from 'dompurify'
 
-import { ref, watch } from 'vue'
+import { shallowRef, watch } from 'vue'
 
+import { useFurigana } from '../../composables/furigana'
 import { useMarkdown } from '../../composables/markdown'
 
 interface Props {
   content: string
   class?: string | string[]
+  /** Adds local display readings. Source text and speech remain unchanged. @default false */
+  furigana?: boolean
 }
 
 const props = defineProps<Props>()
 
-const processedContent = ref('')
+const processedContent = shallowRef('')
+const displayContent = useFurigana(() => processedContent.value, () => props.furigana === true)
 const { process, processSync } = useMarkdown()
 let processRequestId = 0
 
@@ -56,11 +60,24 @@ watch(() => props.content, processContent, { immediate: true })
   <div
     :class="props.class"
     class="markdown-content"
-    v-html="processedContent"
+    v-html="displayContent"
   />
 </template>
 
 <style scoped>
+.markdown-content :deep(ruby) {
+  ruby-position: over;
+}
+
+.markdown-content :deep(rt) {
+  font-size: 0.55em;
+  text-align: center;
+}
+
+.markdown-content:has(ruby) {
+  line-height: 2;
+}
+
 .markdown-content :deep(pre) {
   overflow-x: auto;
   max-width: 100%;

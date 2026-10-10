@@ -95,6 +95,45 @@ async function createLooseMocFile(): Promise<File> {
 }
 
 describe('validateLive2DZip', () => {
+  it('accepts a Cubism 2 model.json archive with MOC and MTN resources', async () => {
+    const zip = new JSZip()
+    zip.file('normal/model.json', JSON.stringify({
+      model: 'model.moc',
+      textures: ['textures/texture.png'],
+      expressions: [{ name: 'smile', file: 'expressions/smile.json' }],
+      motions: { idle: [{ file: 'motions/idle.mtn' }] },
+    }))
+    zip.file('normal/model.moc', new Uint8Array([109, 111, 99, 11, 129, 8]))
+    zip.file('normal/textures/texture.png', new Uint8Array([1, 2, 3]))
+    zip.file('normal/motions/idle.mtn', '# Live2D Animator Motion Data\n$fps=30\nPARAM_ANGLE_X=0,1,0\n')
+    zip.file('normal/expressions/smile.json', JSON.stringify({ params: [{ id: 'PARAM_MOUTH_FORM', val: 1 }] }))
+    const bytes = await zip.generateAsync({ type: 'arraybuffer' })
+    const report = await validateLive2DZip(new File([bytes], 'cubism2.zip'))
+
+    expect(report.status).toBe('VALID')
+    expect(report.model.type).toBe('model2')
+    expect(report.model.entryPoint).toBe('normal/model.json')
+    expect(report.model.moc?.version).toBe(11)
+    expect(report.resources.expressions).toEqual({ discovered: 1, referenced: 1, parsed: 1 })
+    expect(report.resources.motions).toEqual({ discovered: 1, referenced: 1, parsed: 1 })
+  })
+
+  it.each([
+    ['missing model', undefined, new Uint8Array([109, 111, 99, 11]), 'missing-moc-reference'],
+    ['mismatched runtime', 'model.moc', createMoc(), 'invalid-moc-header'],
+    ['missing texture', 'model.moc', new Uint8Array([109, 111, 99, 11]), 'missing-reference'],
+  ] as const)('rejects Cubism 2 settings with %s', async (reason, modelPath, moc, code) => {
+    const zip = new JSZip()
+    zip.file('avatar.model.json', JSON.stringify({ model: modelPath, textures: ['texture.png'] }))
+    zip.file('model.moc', moc)
+    if (reason !== 'missing texture')
+      zip.file('texture.png', new Uint8Array([1, 2, 3]))
+    const bytes = await zip.generateAsync({ type: 'arraybuffer' })
+    const report = await validateLive2DZip(new File([bytes], 'cubism2.zip'))
+    expect(report.status).toBe('INVALID')
+    expect(report.issues.some(issue => issue.code === code && issue.severity === 'error')).toBe(true)
+  })
+
   it('reports the model type, parsed resources, parameters, and base model data', async () => {
     const report = await validateLive2DZip(await createLive2DFile())
 

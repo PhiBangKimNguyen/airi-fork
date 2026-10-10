@@ -93,7 +93,50 @@ async function expectVoiceSettingsPersistence(providerId: 'voicevox' | 'aivis-sp
 describe('voicevox family settings', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     localStorage.clear()
+  })
+
+  it('saves both voicing modes and restores original mode after remount', async () => {
+    vi.stubEnv('VITE_AIRI_HYBRID_ENABLED', 'true')
+    stubReachableEngine()
+    const pinia = createPinia()
+    const screen = await mountSettings(pinia)
+    const config = useProviderConfigStore(pinia)
+    const speech = useSpeechStore(pinia)
+    const toggle = screen.getByRole('switch', { name: /j-reel.label/ })
+
+    await expect.poll(() => config.providers.voicevox?.status).toBe('configured')
+    speech.activeSpeechVoiceId = '8'
+    await expect.element(toggle).toBeChecked()
+    await toggle.click()
+    await expect.poll(() => config.getProviderConfig('voicevox')?.voiceSettings).toMatchObject({
+      prosody: 'original',
+      speed: 1,
+      pitch: 0,
+      intonation: 1,
+      volume: 1,
+    })
+    expect(speech.activeSpeechVoiceId).toBe('8')
+    await toggle.click()
+    await expect.poll(() => config.getProviderConfig('voicevox')?.voiceSettings).toMatchObject({ prosody: 'j' })
+    await toggle.click()
+    await expect.poll(() => config.getProviderConfig('voicevox')?.voiceSettings).toMatchObject({ prosody: 'original' })
+    await expect.poll(() => JSON.parse(localStorage.getItem('settings/providers/configured')!).voicevox.config.voiceSettings.prosody).toBe('original')
+    screen.unmount()
+    const restarted = await mountSettings(createPinia())
+    await expect.element(restarted.getByRole('switch', { name: /j-reel.label/ })).not.toBeChecked()
+  })
+
+  it.each([
+    ['false', 'voicevox'],
+    ['true', 'aivis-speech'],
+  ])('hides J voicing for hybrid=%s and provider=%s', async (hybrid, providerId) => {
+    vi.stubEnv('VITE_AIRI_HYBRID_ENABLED', hybrid)
+    stubReachableEngine()
+    const screen = await mountSettings(createPinia(), providerId)
+
+    await expect.element(screen.getByRole('switch', { name: /j-reel.label/ })).not.toBeInTheDocument()
   })
 
   // ROOT CAUSE:

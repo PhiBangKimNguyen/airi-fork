@@ -130,6 +130,8 @@ watch([componentStateModel, componentStateCanvas], () => {
 })
 
 defineExpose({
+  /** Plays an authored motion without changing the persisted motion selection. */
+  setMotion: (group: string, index?: number) => live2dModelRef.value?.setMotion(group, index),
   canvasElement: () => {
     return live2dCanvasRef.value?.canvasElement()
   },

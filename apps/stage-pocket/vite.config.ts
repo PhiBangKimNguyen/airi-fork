@@ -23,6 +23,7 @@ import VueRouter from 'vue-router/vite'
 import { tryCatch } from '@moeru/std'
 import { localeRemap, serializeStartupFallbackLocales } from '@proj-airi/i18n'
 import { paraformerBilingualZhEn, xAsrBilingualZhEnInt8, zipformerMultilingual } from '@proj-airi/provider-inference/sherpaw-transcription/models'
+import { FuriganaDictionary } from '@proj-airi/stage-ui/plugins/furigana'
 import { Download } from '@proj-airi/unplugin-fetch/vite'
 import { DownloadLive2DSDK } from '@proj-airi/unplugin-live2d-sdk/vite'
 import { Sherpaw } from '@proj-airi/vite-plugin-sherpaw'
@@ -108,6 +109,7 @@ export default defineConfig({
   },
 
   plugins: [
+    FuriganaDictionary(),
     {
       name: 'airi-startup-locales',
       transformIndexHtml: html => html.replace('__AIRI_STARTUP_LOCALES__', serializeStartupFallbackLocales(messages, localeRemap)),

@@ -4,16 +4,19 @@ import type { CaptionChannelEvent } from '@proj-airi/stage-shared'
 import { defineInvoke } from '@moeru/eventa'
 import { useElectronEventaContext, useElectronMouseAroundWindowBorder, useElectronMouseInWindow } from '@proj-airi/electron-vueuse'
 import { createFadeAnimator, PoppinText } from '@proj-airi/stage-ui/components'
+import { FuriganaText } from '@proj-airi/stage-ui/components/markdown'
 import { refDebounced, useBroadcastChannel } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { captionGetIsFollowingWindow, captionIsFollowingWindowChanged } from '../../shared/eventa'
+import { useCaptionVisibility } from '../composables/use-caption-visibility'
 import { useCaptionItems } from '../composables/useCaptionItems'
 
 /** Keep stale captions from lingering after the last broadcast update. */
 const CAPTION_TEXT_EXPIRY_MS = 10_000
 
 const attached = ref(true)
+const captionsVisible = useCaptionVisibility()
 
 const { isOutside: isOutsideWindow } = useElectronMouseInWindow()
 const isOutsideWindowFor250Ms = refDebounced(isOutsideWindow, 250)
@@ -89,7 +92,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="pointer-events-none relative h-full w-full flex items-end justify-center">
+  <div v-show="captionsVisible && captionItems.length > 0" data-testid="caption-bubble" :class="['pointer-events-none relative h-full w-full', 'flex items-end justify-center']">
     <div
       :class="[
         shouldFadeOnCursorWithin ? 'op-0' : 'op-100',
@@ -99,13 +102,12 @@ onUnmounted(() => {
     >
       <div
         v-show="!attached"
-        class="[-webkit-app-region:drag] absolute left-1/2 h-[14px] w-[36px] border border-[rgba(125,125,125,0.35)] rounded-[10px] bg-[rgba(125,125,125,0.28)] backdrop-blur-[6px] -top-2 -translate-x-1/2"
-        title="Drag to move"
+        :class="['[-webkit-app-region:drag] absolute left-1/2 -top-2 -translate-x-1/2', 'h-[14px] w-[36px] rounded-[10px] border border-neutral-500/35 bg-neutral-500/28 backdrop-blur-[6px]']"
       >
-        <div class="absolute left-1/2 top-1/2 h-[3px] w-4 rounded-full bg-[rgba(255,255,255,0.85)] -translate-x-1/2 -translate-y-1/2" />
+        <div :class="['absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2', 'h-[3px] w-4 rounded-full bg-neutral-50/85']" />
       </div>
 
-      <div class="max-w-[80vw] flex flex-col gap-1">
+      <div :class="['max-w-[80vw]', 'flex flex-col gap-1']">
         <div
           v-for="type in captionTypes"
           v-show="captionTextByType[type].length > 0"
@@ -116,10 +118,16 @@ onUnmounted(() => {
           ]"
           :style="type === 'caption-assistant' ? { paintOrder: 'stroke fill' } : undefined"
         >
+          <FuriganaText
+            v-if="type === 'caption-assistant'"
+            :text="captionTextByType[type].map(segment => segment.text).join('')"
+            :class="['color-neutral-50! align-middle']"
+          />
           <PoppinText
+            v-else
             :text="captionTextByType[type]"
             :animator="captionAnimatorByType[type]"
-            :text-class="type === 'caption-assistant' ? 'color-neutral-50! align-middle' : type === 'caption-speaker' ? 'color-neutral-50! align-middle' : ''"
+            text-class="color-neutral-50! align-middle"
           />
         </div>
       </div>
@@ -133,7 +141,7 @@ onUnmounted(() => {
       leave-from-class="opacity-100"
       leave-to-class="opacity-50"
     >
-      <div v-if="isAroundWindowBorderFor250Ms" class="pointer-events-none absolute left-0 top-0 z-999 h-full w-full">
+      <div v-if="isAroundWindowBorderFor250Ms" :class="['pointer-events-none absolute left-0 top-0 z-999 h-full w-full']">
         <div
           :class="[
             'b-primary/50',

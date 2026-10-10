@@ -12,7 +12,8 @@ export default defineConfig({
   manifest: {
     name: 'AIRI Web Extension',
     description: 'Capture web context (videos, pages, subtitles) for Project AIRI.',
-    permissions: ['storage', 'tabs'],
+    permissions: ['storage', 'tabs', 'activeTab', 'tabCapture', 'offscreen'],
+    minimum_chrome_version: '116',
     optional_host_permissions: [
       '*://*/*',
     ],

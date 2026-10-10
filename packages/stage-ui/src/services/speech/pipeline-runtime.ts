@@ -6,6 +6,7 @@ import { createPushStream } from '@proj-airi/pipelines-audio'
 import { Mutex } from 'es-toolkit'
 import { nanoid } from 'nanoid'
 
+import { JapaneseReplySpeech } from '../../libs/speech/japanese-reply-speech'
 import {
   getSpeechBusContext,
   speechIntentCancelEvent,
@@ -248,10 +249,18 @@ export function createSpeechPipelineRuntime(): SpeechPipelineRuntime {
   }
 
   function openIntent(options?: IntentOptions) {
-    if (hostPipeline)
-      return hostPipeline.openIntent(options)
-
-    return createRemoteIntent(options)
+    const intent = hostPipeline ? hostPipeline.openIntent(options) : createRemoteIntent(options)
+    if (import.meta.env.VITE_AIRI_HYBRID_ENABLED !== 'true' || import.meta.env.VITE_LOCAL_REPLY_LANGUAGE !== 'ja-en')
+      return intent
+    const speech = new JapaneseReplySpeech()
+    return {
+      ...intent,
+      writeLiteral(value: string) {
+        const japanese = speech.consume(value)
+        if (japanese)
+          intent.writeLiteral(japanese)
+      },
+    }
   }
 
   function isHost() {

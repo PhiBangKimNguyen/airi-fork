@@ -3,7 +3,8 @@ import cropImg from '@lemonneko/crop-empty-pixels'
 import { Application } from '@pixi/app'
 import { extensions } from '@pixi/extensions'
 import { Ticker, TickerPlugin } from '@pixi/ticker'
-import { Live2DFactory, Live2DModel } from 'pixi-live2d-display/cubism4'
+
+import { Live2DFactory, Live2DModel } from './live2d-runtime'
 
 /**
  * Render a Live2D zip/file to an offscreen canvas and return a padded preview data URL.
@@ -66,6 +67,8 @@ export async function loadLive2DModelPreview(file: File) {
     modelInstance.anchor.set(0.5, 0.5)
 
     await new Promise(resolve => setTimeout(resolve, 500))
+    // The renderer skips model updates when no elapsed time is queued.
+    modelInstance.update(1)
     app.renderer.render(app.stage)
 
     const croppedCanvas = cropImg(offscreenCanvas)

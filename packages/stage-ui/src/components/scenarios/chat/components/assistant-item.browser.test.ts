@@ -33,6 +33,15 @@ function renderMessage(stickerId: string, pinia = createPinia()) {
 }
 
 describe('assistant stickers', () => {
+  it('adds local readings to saved Japanese replies without requiring Pinia', async () => {
+    setActivePinia(undefined)
+    const view = render(AssistantItem, {
+      props: { label: 'AIRI', message: { role: 'assistant', content: '猫が好き。', slices: [], tool_results: [] } },
+      global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en } })] },
+    })
+    await expect.poll(() => view.container.querySelector('rt')?.textContent, { timeout: 15_000 }).toBe('ねこ')
+  })
+
   it('renders a text-only reply without requiring the sticker library or Pinia', async () => {
     setActivePinia(undefined)
     const view = render(AssistantItem, {

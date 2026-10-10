@@ -1,10 +1,11 @@
-import type { IntentHandle } from '@proj-airi/pipelines-audio'
+import type { IntentHandle, StreamingControlEmotion } from '@proj-airi/pipelines-audio'
 
 import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 
 import { useLlmmarkerParser } from '../../composables/llm-marker-parser'
+import { speechCaption } from '../../libs/speech/japanese-reply-speech'
 import { useAiriCardStore } from '../modules'
 import { useSpeechRuntimeStore } from '../speech-runtime'
 
@@ -41,6 +42,8 @@ export const useCharacterStore = defineStore('character', () => {
 
   const reactions = ref<CharacterSparkNotifyReaction[]>([])
   const streamingReactions = ref<Map<string, StreamingReactionState>>(new Map())
+  // Display retains the complete bilingual reply; speech filtering operates on a separate intent stream.
+  const reactionCaption = computed(() => speechCaption([...streamingReactions.value.values()].at(-1)?.reaction.message ?? reactions.value.at(-1)?.message ?? ''))
   const speechRuntimeStore = useSpeechRuntimeStore()
 
   async function emitTextOutput(text: string) {
@@ -68,7 +71,7 @@ export const useCharacterStore = defineStore('character', () => {
     intent.end()
   }
 
-  function onSparkNotifyReactionStreamEvent(sparkEventId: string, chunk: string, options?: { metadata?: Record<string, unknown> }) {
+  function onSparkNotifyReactionStreamEvent(sparkEventId: string, chunk: string, options?: { metadata?: Record<string, unknown>, emotion?: StreamingControlEmotion }) {
     if (!streamingReactions.value.has(sparkEventId)) {
       const newReaction = reactive({
         id: nanoid(),
@@ -85,6 +88,11 @@ export const useCharacterStore = defineStore('character', () => {
         priority: 'high',
         behavior: 'interrupt',
       })
+
+      // The speech host receives the cue through the same Eventa intent as the reply.
+      // Its playback callback applies the emotion when this intent starts speech.
+      if (options?.emotion)
+        intent.writeSpecial(`<|ACT ${JSON.stringify({ emotion: { name: options.emotion, intensity: 1 } })}|>`)
 
       const parser = parserFactory({
         onLiteral: async (literal) => {
@@ -143,6 +151,7 @@ export const useCharacterStore = defineStore('character', () => {
   return {
     name,
     reactions,
+    reactionCaption,
     systemPrompt,
 
     recordSparkNotifyReaction,

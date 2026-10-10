@@ -32,6 +32,11 @@ materials, outlines, and the shared runtime update order. Physics comes from
 `@moeru/three-mmd-physics-ammo` and is loaded lazily, so the Ammo WASM runtime
 is initialized only after a live MMD model is mounted.
 
+Physics catch-up is limited to one 60 Hz frame per update. Excess elapsed time
+after a render hitch is discarded. This prevents catch-up work from causing
+further slow frames on large rigs. Normal frame time, gravity, physics-aware
+IK, and authored rigid bodies remain active.
+
 ## How to use
 
 The package exposes the same scene contract as the other renderers, so it is

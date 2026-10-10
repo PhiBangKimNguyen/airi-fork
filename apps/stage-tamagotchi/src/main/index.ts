@@ -165,6 +165,16 @@ app.whenReady().then(async () => {
     return
   }
 
+  if (env.AIRI_HYBRID_ENABLED === 'true') {
+    // Renderer inference and account sync cannot bypass the local credential and privacy boundary.
+    session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      const url = new URL(details.url)
+      const network = ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)
+      const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+      callback({ cancel: network && !loopback })
+    })
+  }
+
   setupSherpawModelAssetsProtocol(resolve(getElectronMainDirname(), '..', 'renderer'))
   setupPermissionHandlers(session.defaultSession, hasSelectedScreenCaptureSource)
 

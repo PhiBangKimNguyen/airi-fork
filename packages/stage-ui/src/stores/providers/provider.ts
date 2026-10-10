@@ -14,6 +14,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, toRaw, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { hybridEnabled } from '../../libs/privacy-routing'
 import {
   CHAT_COMPLETIONS_VALIDATOR_ID,
   getProviderValidationIntervalMs,
@@ -950,6 +951,12 @@ export const useProviderStore = defineStore('provider', () => {
     providerId: string,
     options?: ChatRequestOptions,
   ): Promise<GenerationProvider> {
+    // Background consumers cannot inherit the user's cloud chat selection.
+    // The typed-chat router creates its cloud provider through the registry itself.
+    if (hybridEnabled) {
+      const { usePrivacyRoutingStore } = await import('../privacy-routing')
+      return (await usePrivacyRoutingStore().provider('local')).provider
+    }
     const provider = getGenerationProvider(await getProviderInstance(providerId))
     if (!provider)
       throw new Error(`Provider ${providerId} does not support generation`)
