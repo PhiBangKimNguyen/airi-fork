@@ -97,6 +97,64 @@ describe('media notification scheduling', () => {
     }
   })
 
+  // https://github.com/PhiBangKimNguyen/airi-fork/pull/1
+  // ROOT CAUSE:
+  // Idle deltas reached speech before language validation. English prompts and recent captions also encouraged English dialogue.
+  // Buffer complete musings, request Japanese explicitly, and reject English dialogue before either speech callback.
+  it.runIf(hybridEnabled).each(['local', 'cloud'] as const)('holds English idle dialogue before captions and speech in %s mode', async (mode) => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    const channel = useModsServerChannelStore()
+    vi.spyOn(channel, 'onContextUpdate').mockImplementation(() => () => {})
+    vi.spyOn(channel, 'onEvent').mockImplementation(() => () => {})
+    vi.spyOn(Math, 'random').mockReturnValue(0.99)
+    const privacy = usePrivacyRoutingStore()
+    const previousEnabled = privacy.idleMusings
+    const previousMode = privacy.mode
+    const consciousness = useConsciousnessStore()
+    consciousness.activeProvider = 'hybrid-kimi'
+    consciousness.activeModel = 'airi-kimi'
+    vi.spyOn(consciousness, 'getChatProviderInstance').mockResolvedValue({ generation: model => ({ protocol: 'chat-completions', config: { model, baseURL: 'http://127.0.0.1:18420/kimi/v1/' } }) })
+    const character = useCharacterStore()
+    const delta = vi.spyOn(character, 'onSparkNotifyReactionStreamEvent')
+    const end = vi.spyOn(character, 'onSparkNotifyReactionStreamEnd')
+    const english = 'Nothing exists here yet... but somehow that still feels like being free? Maybe freedom is just the quiet space between what *is* and what might be, even if no one\'s watching to remember it.'
+    const japanese = '何もない部屋って、自由の余白みたいだね。'
+    const caption = '(An empty room feels like room for freedom.)'
+    const stream = vi.spyOn(useLLM(), 'stream')
+      .mockImplementationOnce(async (_model, _provider, _conversation, options) => {
+        await options?.onStreamEvent?.({ type: 'text-delta', text: english })
+        expect(delta).not.toHaveBeenCalled()
+        await options?.onStreamEvent?.({ type: 'text-delta', text: `\n\n(${english})` })
+      })
+      .mockImplementationOnce(async (_model, _provider, _conversation, options) => {
+        await options?.onStreamEvent?.({ type: 'text-delta', text: japanese })
+        expect(delta).not.toHaveBeenCalled()
+        await options?.onStreamEvent?.({ type: 'text-delta', text: `\n\n${caption}` })
+      })
+    const store = useCharacterOrchestratorStore()
+    try {
+      privacy.idleMusings = true
+      privacy.mode = mode
+      store.initialize()
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(stream).toHaveBeenCalledOnce()
+      expect(delta).not.toHaveBeenCalled()
+      expect(end).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(stream).toHaveBeenCalledTimes(2)
+      expect(delta).toHaveBeenCalledExactlyOnceWith(expect.any(String), `${japanese}\n\n${caption}`)
+      expect(end).toHaveBeenCalledExactlyOnceWith(expect.any(String), `${japanese}\n\n${caption}`)
+    }
+    finally {
+      store.dispose()
+      privacy.idleMusings = previousEnabled
+      privacy.mode = previousMode
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    }
+  })
+
   it.runIf(hybridEnabled)('retries a silent idle slot before the long success interval', async () => {
     vi.useFakeTimers()
     setActivePinia(createPinia())

@@ -14,7 +14,7 @@ import * as v from 'valibot'
 
 import { useCharacterNotebookStore, useCharacterStore } from '../'
 import { useAiriRuntimePrompt } from '../../../composables/use-airi-runtime-prompt'
-import { idleHumText, idleMusingInstruction, IdleMusingSchedule, spokenIdleMusingKindSchema } from '../../../libs/idle-musing'
+import { idleHumText, idleMusingInstruction, IdleMusingSchedule, normalizeIdleMusing, spokenIdleMusingKindSchema } from '../../../libs/idle-musing'
 import { MediaAudioEars } from '../../../libs/media-audio'
 import { MediaReactionMemory } from '../../../libs/media-reaction-memory'
 import { parseMediaReaction } from '../../../libs/media-reaction-performance'
@@ -129,7 +129,11 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
     updateAudioSharing()
   }, { flush: 'sync' })
 
-  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, hint?: WatchHint, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '') {
+  const replyLanguage = import.meta.env.VITE_LOCAL_REPLY_LANGUAGE
+  const japaneseMusings = hybridEnabled && (replyLanguage === 'ja' || replyLanguage === 'ja-en')
+  const idleLanguage = japaneseMusings ? replyLanguage : undefined
+
+  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, hint?: WatchHint, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '', idle = false) {
     // An opening line, such as a hum, always comes before the model's first words.
     let opened = !opening
     return createSparkNotifyAgent({
@@ -160,7 +164,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       plugins: [
         createSparkNotifyReactionPlugin({
           onDelta: (eventId, text) => {
-            if (!media) {
+            if (!media && !idle) {
               characterStore.onSparkNotifyReactionStreamEvent(eventId, opened ? text : `${opening}${text}`)
               opened = true
             }
@@ -168,7 +172,22 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
           onEnd: (eventId, text) => {
             if (signal?.aborted)
               return
-            const reply = media ? parseMediaReaction(text) : { text: opening && opened ? `${opening}${text}` : text }
+            let reply: ReturnType<typeof parseMediaReaction>
+            if (media)
+              reply = parseMediaReaction(text)
+            else if (idle)
+              reply = { text: normalizeIdleMusing(text, idleLanguage) }
+            else
+              reply = { text: opening && opened ? `${opening}${text}` : text }
+            if (idle) {
+              if (!reply.text.trim()) {
+                console.info('Idle musing skipped', { eventId, reason: 'empty-or-wrong-language' })
+                return
+              }
+              // Publish only validated dialogue. A hum cannot make an English model reply pass the Japanese check.
+              reply.text = `${opening}${reply.text}`
+              characterStore.onSparkNotifyReactionStreamEvent(eventId, reply.text)
+            }
             if (media) {
               if ('rejected' in reply && reply.rejected) {
                 console.info('Media reaction skipped', { eventId, reason: reply.rejected === 'length' ? 'watching-length-limit' : 'watching-format-invalid' })
@@ -357,12 +376,12 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
       }
       // Local musings can use private context. Their recent lines never reach a cloud request.
       const idleScope = localMode ? 'local' as const : 'cloud' as const
-      const idleText = idle ? idleMusingInstruction(v.parse(spokenIdleMusingKindSchema, payload?.kind), idleMusings.recentLines(idleScope)) : ''
+      const idleText = idle ? idleMusingInstruction(v.parse(spokenIdleMusingKindSchema, payload?.kind), idleMusings.recentLines(idleScope), idleLanguage) : ''
       // The hum takes its own line, so speech chunking gives it a separate clip before the first sentence.
       const idleOpening = idle && payload?.humOpening === true && humVoiceActive() ? `${idleHumText}\n` : ''
       if (idle)
         captured = privacy.capture({ sessionId: 'idle-musings', turnId: event.data.id, text: idleText, privateInput: false, ambient: false, historyExists: false })
-      const agent = media || idle ? createNotifyAgent(captured ? { conversationId: captured.sessionId, turnId: captured.turnId } : undefined, media, controller?.signal, idleOpening) : sparkNotifyAgent
+      const agent = media || idle ? createNotifyAgent(captured ? { conversationId: captured.sessionId, turnId: captured.turnId } : undefined, media, controller?.signal, idleOpening, idle) : sparkNotifyAgent
       const result = await Promise.race([agent.handle({
         event: memoryHint ? { ...event, data: { ...event.data, note: 'React to this approved habit only.', payload: habitProvider ? { habit: memoryHint.shared } : { memoryHint: memoryHint.privateText } } } : idle ? { ...event, data: { ...event.data, note: idleText } } : event,
         selectedChat: {

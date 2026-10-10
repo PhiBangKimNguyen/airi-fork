@@ -31,6 +31,12 @@ Song comparisons and genre commentary route locally. They never enter the approv
 Use this memory for shared playback habits. It does not fingerprint audio or import a YouTube account playlist.
 Disable viewing memory to stop collection. Forget viewing history to delete songs, genre evidence, and remembered comments.
 
+## Idle musing language
+
+Hybrid idle musings follow `VITE_LOCAL_REPLY_LANGUAGE`. The `ja` and `ja-en` modes explicitly request Japanese dialogue despite English prompts and recent captions.
+The orchestrator buffers each complete musing before captions and speech. English dialogue is rejected, and the idle schedule keeps its short retry interval.
+Bilingual musings retain one English caption. Expression markers remain available to the action parser and stay hidden in captions.
+
 ## Video reaction motions
 
 Video and viewing-habit replies choose an emotion cue with their spoken reaction.

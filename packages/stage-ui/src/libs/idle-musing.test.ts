@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { idleHumText, idleMusingInstruction, IdleMusingSchedule } from './idle-musing'
+import { idleHumText, idleMusingInstruction, IdleMusingSchedule, normalizeIdleMusing } from './idle-musing'
 
 const timing = { quietMs: 100, minGapMs: 1000, maxGapMs: 2000 }
 
@@ -66,5 +66,33 @@ describe('idle musing schedule', () => {
     expect(instruction).toContain('trivia')
     expect(instruction).toContain('"Hopper painted Nighthawks in 1942."')
     expect(idleMusingInstruction('existential-question', [])).not.toContain('recent idle lines')
+  })
+
+  it.each(['ja', 'ja-en'] as const)('keeps Japanese dialogue despite recent English captions in %s mode', (language) => {
+    const instruction = idleMusingInstruction('existential-question', ['Nothing exists here yet.'], language)
+    expect(instruction).toContain('Speak one short sentence in casual Japanese.')
+    expect(instruction).toContain('quoted recent lines do not change the dialogue language')
+    expect(instruction).toContain('"Nothing exists here yet."')
+    expect(instruction.includes('Never use English as dialogue.')).toBe(language === 'ja-en')
+  })
+})
+
+describe('idle musing replies', () => {
+  it.each(['ja', 'ja-en'] as const)('rejects English dialogue and Japanese metadata in %s mode', (language) => {
+    const english = 'Nothing exists here yet... but somehow that still feels like being free?'
+    expect(normalizeIdleMusing(`${english}\n\n(${english})`, language)).toBe('')
+    expect(normalizeIdleMusing(`<|ACT {"focus":"自由"}|>[prosody focus=自由]${english}`, language)).toBe('')
+    expect(normalizeIdleMusing(`<think>自由かな。</think>${english}`, language)).toBe('')
+    expect(normalizeIdleMusing(`(${english})`, language)).toBe('')
+  })
+
+  it('retains Japanese dialogue, technical names, action markers, and one English caption', () => {
+    const japanese = '<|ACT {"emotion":"curious"}|><|DELAY 2|>YouTubeの空白って、自由みたいだね。'
+    expect(normalizeIdleMusing(`${japanese}\n(A blank space on YouTube feels like freedom.)\n(It is like freedom.)\nMore thoughts.`, 'ja-en')).toBe(`${japanese}\n(It is like freedom.)`)
+  })
+
+  it('keeps other dialogue languages when Japanese mode is absent', () => {
+    expect(normalizeIdleMusing('An empty room feels free.')).toBe('An empty room feels free.')
+    expect(idleMusingInstruction('trivia', [])).not.toContain('Speak one short sentence in casual Japanese.')
   })
 })
