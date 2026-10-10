@@ -81,7 +81,8 @@ describe('persistent private viewing memory', () => {
     const hint = restarted.takeHint(video.url, start + 24 * 60 * 60_000)
     expect(hint?.privateText).toContain('"distinctViewingDays":2')
     expect(hint?.privateText).toContain('PRIVATE_FAVORITE_CHANNEL')
-    expect(hint?.privateText).toContain('This again?')
+    expect(hint?.privateText).not.toContain('This again?')
+    expect(restarted.recent(video.url)).toContain('またこれ？ (This again?)')
     expect(restarted.preferences().favorites[0].days).toBe(2)
     expect(restarted.snapshot().videos[0].watchSeconds).toBe(15)
     restarted.completeHint(video.url, hint!, start + 24 * 60 * 60_000)
@@ -133,7 +134,8 @@ describe('collected song versions and genres', () => {
     expect(hint?.privateText).toContain('PRIVATE song comparison')
     expect(hint?.privateText).toContain(song.title)
     expect(hint?.privateText).toContain(live.title)
-    expect(hint?.privateText).toContain('That chorus again!')
+    expect(hint?.privateText).not.toContain('That chorus again!')
+    expect(restarted.recent(live.url)).toContain('That chorus again!')
     expect(hint?.shared).toBeUndefined()
     expect(restarted.playlist()).toHaveLength(1)
     expect(restarted.playlist()[0].versions).toHaveLength(2)
@@ -241,5 +243,43 @@ describe('collected song versions and genres', () => {
     expect(hint?.kind).toBe('version')
     memory.completeHint(live.url, hint!, start + 210_000)
     expect(memory.takeHint(live.url, start + 220_000)?.kind).toBe('playlist')
+  })
+})
+// https://github.com/PhiBangKimNguyen/airi-fork/pull/1
+// ROOT CAUSE:
+// Generated comments entered later prompts as facts. Keep them only for duplicate checks and reject unsupported claims before storage.
+describe('grounded watch comments', () => {
+  it('rejects incorrect titles and replay claims before saving them', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    const url = 'https://www.youtube.com/watch?v=NhINs_fS2Us'
+    memory.observe({ url, title: 'Город, которого нет', isPlaying: true }, start)
+    expect(memory.remember(url, '「Ladies\' Choice」を聴いてるね。')).toBe(false)
+    expect(memory.remember(url, 'この曲を10回も再生したね。')).toBe(false)
+    expect(memory.recent(url)).toEqual([])
+    expect(memory.remember(url, '「Город, которого нет」って、いい曲だね。')).toBe(true)
+  })
+
+  it('removes only the confirmed incorrect comment without changing observations', () => {
+    const url = 'https://www.youtube.com/watch?v=NhINs_fS2Us'
+    const memory = new MediaWatchMemory({ version: 1, videos: [{ id: 'NhINs_fS2Us', title: 'Город, которого нет', channel: 'Artist', days: ['2026-10-10'], visits: 1, watchSeconds: 235, lastSeen: start, lastHint: 0, comments: ['「Ladies\' Choice」を聴いてるね。', '静かな曲だね。'] }] })
+    const before = memory.snapshot().videos[0]
+    expect(memory.forgetComment(url, '「Ladies\' Choice」を聴いてるね。')).toBe(true)
+    expect(memory.forgetComment(url, '「Ladies\' Choice」を聴いてるね。')).toBe(false)
+    expect(memory.snapshot().videos[0]).toEqual({ ...before, comments: ['静かな曲だね。'] })
+  })
+
+  it('withholds previous generated claims from later playlist prompts', () => {
+    const memory = new MediaWatchMemory({ version: 1, videos: [] })
+    for (let index = 0; index < 3; index++) {
+      const url = `https://www.youtube.com/watch?v=unknown${index}`
+      memory.observe({ url, title: `Artist - Song ${index} (Live)`, isPlaying: true }, start + index * 60_000)
+      memory.observe({ url, title: `Artist - Song ${index} (Live)`, isPlaying: true }, start + index * 60_000 + 30_000)
+      memory.remember(url, 'REPEATED_COMMENT_CLAIM')
+    }
+    const url = 'https://www.youtube.com/watch?v=unknown2'
+    const hint = memory.takeHint(url, start + 150_000)
+    expect(hint?.privateText).not.toContain('REPEATED_COMMENT_CLAIM')
+    expect(hint?.evidence.titles).toContain('Artist - Song 2 (Live)')
+    expect(memory.recent(url)).toContain('REPEATED_COMMENT_CLAIM')
   })
 })

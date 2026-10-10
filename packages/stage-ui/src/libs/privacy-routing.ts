@@ -192,7 +192,7 @@ export class PrivacyRouter {
         && request.continuity.sessionId === this.publicMedia.sessionId && request.continuity.sharingId === this.publicMedia.sharingId
         ? request.continuity
         : undefined
-      const continuity = shared ? { previousTitle: shared.previousTitle, recentWords: shared.recentWords, recentComments: shared.recentComments } : {}
+      const continuity = shared ? { previousTitle: shared.previousTitle, recentWords: shared.recentWords } : {}
       const endings = shared?.recentEndings ?? []
       const lyrics = request.lane === 'local' ? [] : corroboratedLyrics(request.media.audioObservations ?? [], request.media.text ?? '')
       const observations = request.lane === 'local' ? [] : (request.media.audioObservations ?? []).map(normalizeAuditoryObservation).map(({ lyricEvidence: _lyrics, ...sound }) => sound)

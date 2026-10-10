@@ -1,3 +1,4 @@
+import type { MediaReactionEvidence } from '../libs/media-reaction-grounding'
 import type { MediaWatchState, WatchHint } from '../libs/media-watch-memory'
 
 import { useLocalStorage } from '@vueuse/core'
@@ -71,14 +72,21 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
   function recent(url: string) {
     return enabled.value ? memory().recent(url) : []
   }
-  function remember(url: string, text: string) {
+  function remember(url: string, text: string, evidence?: MediaReactionEvidence) {
     if (!enabled.value)
       return true
     const current = memory()
-    const accepted = current.remember(url, text)
+    const accepted = current.remember(url, text, evidence)
     if (accepted)
       state.value = current.snapshot()
     return accepted
+  }
+  function forgetComment(url: string, text: string) {
+    const current = memory()
+    const removed = current.forgetComment(url, text)
+    if (removed)
+      state.value = current.snapshot()
+    return removed
   }
   function clear() {
     session.clear()
@@ -97,5 +105,5 @@ export const useMediaWatchMemoryStore = defineStore('media-watch-memory', () => 
     timeTeasePeriods.value = [...timeTeasePeriods.value, period].slice(-10)
     return true
   }
-  return { enabled, habitProvider, timeAwareTeasing, preferences, playlist, musicPreferences, observe, observeMusic, takeHint, completeHint, releaseHint, recent, remember, canTimeTease, rememberTimeTease, clear }
+  return { enabled, habitProvider, timeAwareTeasing, preferences, playlist, musicPreferences, observe, observeMusic, takeHint, completeHint, releaseHint, recent, remember, forgetComment, canTimeTease, rememberTimeTease, clear }
 })

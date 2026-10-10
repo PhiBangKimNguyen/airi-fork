@@ -41,6 +41,12 @@ The reply normalizer removes that exact phrase before captions and speech, even 
 
 ## Video reaction motions
 
+Media replies validate quoted work names against supplied titles before captions, speech, or saved comments.
+Cyrillic names retain their supplied spelling. The approved English name for `イブの記憶` remains `Ib's Memory`.
+Replay claims require a matching session playback count. Viewing visits, days, versions, and listening duration cannot establish that count.
+Invalid replies are discarded as a complete bilingual pair. Rejected habit replies retain their allowance for a later attempt.
+Previous generated comments remain available for duplicate suppression. They are excluded from later media and habit prompts.
+
 Video and viewing-habit replies choose an emotion cue with their spoken reaction.
 The media boundary removes `[emotion=NAME]` before duplicate checks, captions, and speech.
 It removes cues from any reply position. The first cue controls the gesture, and repeated cues remain hidden.

@@ -1,6 +1,7 @@
 import type { SparkNotifyResponseControl } from '@proj-airi/core-agent/agents/spark-notify'
 import type { WebSocketBaseEvent, WebSocketEventOf, WebSocketEvents } from '@proj-airi/server-sdk'
 
+import type { MediaReactionEvidence } from '../../../libs/media-reaction-grounding'
 import type { WatchHint } from '../../../libs/media-watch-memory'
 import type { RoutedRequest } from '../../../libs/privacy-routing'
 import type { CloudProvider } from '../../../types/cloud-provider'
@@ -133,7 +134,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
   const japaneseMusings = hybridEnabled && (replyLanguage === 'ja' || replyLanguage === 'ja-en')
   const idleLanguage = japaneseMusings ? replyLanguage : undefined
 
-  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, hint?: WatchHint, lyricsAvailable?: boolean }, signal?: AbortSignal, opening = '', idle = false) {
+  function createNotifyAgent(correlation?: { conversationId: string, turnId: string }, media?: { scope: 'local' | 'cloud', sharingId: string, url: string, habitProvider?: 'brain' | 'gemini' | 'kimi', timeAware?: boolean, timePeriodKey?: string, habit: boolean, hint?: WatchHint, lyricsAvailable?: boolean, evidence: MediaReactionEvidence }, signal?: AbortSignal, opening = '', idle = false) {
     // An opening line, such as a hum, always comes before the model's first words.
     let opened = !opening
     return createSparkNotifyAgent({
@@ -174,7 +175,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
               return
             let reply: ReturnType<typeof parseMediaReaction>
             if (media)
-              reply = parseMediaReaction(text)
+              reply = parseMediaReaction(text, media.evidence)
             else if (idle)
               reply = { text: normalizeIdleMusing(text, idleLanguage) }
             else
@@ -190,7 +191,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
             }
             if (media) {
               if ('rejected' in reply && reply.rejected) {
-                console.info('Media reaction skipped', { eventId, reason: reply.rejected === 'length' ? 'watching-length-limit' : 'watching-format-invalid' })
+                console.info('Media reaction skipped', { eventId, reason: `watching-${reply.rejected}-invalid` })
                 return
               }
               if (unsupportedLyricClaim(reply.text, media.lyricsAvailable === true)) {
@@ -208,7 +209,7 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
               // Buffer a media reply until it can be checked. Revoked or repeated comments never reach TTS.
               if (media.sharingId !== mediaSharingId || media.url !== mediaUrl || !mediaMemory.remember(media.scope, media.sharingId, media.url, reply.text))
                 return
-              if (!watchMemory.remember(media.url, reply.text))
+              if (!watchMemory.remember(media.url, reply.text, media.evidence))
                 return
               if (media.timePeriodKey && !watchMemory.rememberTimeTease(media.timePeriodKey))
                 return
@@ -357,7 +358,16 @@ export const useCharacterOrchestratorStore = defineStore('character-orchestrator
         timer = setTimeout(() => controller.abort(new Error('Spark reaction deadline exceeded.')), 45_000)
       }
       const hints = mediaMemory.hints(scope)
-      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint, hint: memoryHint, lyricsAvailable: scope === 'cloud' && corroboratedLyrics(audioObservations ?? [], typeof payload?.text === 'string' ? payload.text : '').length > 0 } : undefined
+      const lyrics = scope === 'cloud' ? corroboratedLyrics(audioObservations ?? [], typeof payload?.text === 'string' ? payload.text : '') : []
+      // Capture the same evidence supplied to this request. Private historical titles never authorize a title in a counts-only cloud tease.
+      let evidence: MediaReactionEvidence
+      if (habitProvider && memoryHint)
+        evidence = { titles: [], playsThisSession: memoryHint.shared?.kind === 'replay' ? memoryHint.shared.playsThisSession : undefined }
+      else if (memoryHint)
+        evidence = memoryHint.evidence
+      else
+        evidence = { titles: typeof payload?.title === 'string' ? [payload.title] : [], lyricLines: lyrics.map(line => line.text) }
+      const media = mediaReaction ? { scope, sharingId: mediaSharingId, url: mediaUrl, habitProvider, timeAware, timePeriodKey: timeAware ? airiTimePeriodKey(now) : undefined, habit: !!memoryHint, hint: memoryHint, lyricsAvailable: lyrics.length > 0, evidence } : undefined
       const sharedMedia = cloudVideo && !memoryHint
         ? parseSharedVideo({ ...payload, modeHint: hints.modeHint, reactionSound: hints.reactionSound, timeOfDay: timeAware ? airiTimeOfDay(now) : undefined, audioObservations, audioPriority: audioEarsEnabled, researchMedia: inklingResearchMedia })
         : undefined

@@ -19,7 +19,7 @@ import { useCharacterOrchestratorStore } from './store'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: ref('en'), t: (key: string) => key, te: () => true }) }))
 
 describe('media notification scheduling', () => {
-  it.runIf(hybridEnabled).each(['silence', 'accepted', 'timeout', 'overlong', 'annotation'] as const)('completes a private playlist allowance only after accepted output: $0', async (outcome) => {
+  it.runIf(hybridEnabled).each(['silence', 'accepted', 'timeout', 'overlong', 'annotation', 'wrong-title', 'wrong-replay'] as const)('completes a private playlist allowance only after accepted output: $0', async (outcome) => {
     vi.useFakeTimers()
     setActivePinia(createPinia())
     const channel = useModsServerChannelStore()
@@ -40,6 +40,9 @@ describe('media notification scheduling', () => {
     const capture = vi.spyOn(privacy, 'capture')
     const complete = vi.spyOn(memory, 'completeHint')
     const release = vi.spyOn(memory, 'releaseHint')
+    const character = useCharacterStore()
+    const delta = vi.spyOn(character, 'onSparkNotifyReactionStreamEvent')
+    const end = vi.spyOn(character, 'onSparkNotifyReactionStreamEnd')
     let signal: AbortSignal | undefined
     vi.spyOn(useLLM(), 'stream').mockImplementation(async (_model, _provider, _conversation, options) => {
       signal = options?.abortSignal
@@ -51,6 +54,10 @@ describe('media notification scheduling', () => {
         await options?.onStreamEvent?.({ type: 'text-delta', text: '[PRIVATE listening preferences]ライブ版が集まったね。\n(You have collected live versions.)' })
       if (outcome === 'accepted')
         await options?.onStreamEvent?.({ type: 'text-delta', text: 'ふふ、ライブ版が三曲も集まったね。\n\n(Heh, you have collected three live versions.)' })
+      if (outcome === 'wrong-title')
+        await options?.onStreamEvent?.({ type: 'text-delta', text: '「Ladies\' Choice」を聴いてるね。\n(You are listening to "Ladies\' Choice".)' })
+      if (outcome === 'wrong-replay')
+        await options?.onStreamEvent?.({ type: 'text-delta', text: 'この曲を10回も再生したね。\n(You played this ten times.)' })
     })
     const store = useCharacterOrchestratorStore()
     const current = { url: 'https://www.youtube.com/watch?v=playlist2', title: 'Artist - Song 2 (Live)', isPlaying: true }
@@ -83,6 +90,9 @@ describe('media notification scheduling', () => {
       expect(complete).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0)
       expect(release).toHaveBeenCalledOnce()
       expect(store.processing).toBe(false)
+      expect(delta).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0)
+      expect(end).toHaveBeenCalledTimes(outcome === 'accepted' ? 1 : 0)
+      expect(memory.recent(current.url)).toHaveLength(outcome === 'accepted' ? 1 : 0)
       vi.advanceTimersByTime(30_000)
       memory.observe(current)
       expect(memory.takeHint(current.url)?.kind).toBe(outcome === 'accepted' ? undefined : 'playlist')

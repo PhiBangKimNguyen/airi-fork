@@ -1,5 +1,8 @@
+import type { MediaReactionEvidence } from './media-reaction-grounding'
+
 import * as v from 'valibot'
 
+import { unsupportedMediaClaim } from './media-reaction-grounding'
 import { normalizeEnglishTitles } from './speech/bilingual-style'
 import { cleanReplyTemplate, JapaneseReplySpeech, speechCaption } from './speech/japanese-reply-speech'
 
@@ -83,7 +86,7 @@ export function normalizeWatchingReply(text: string): string {
  * parseMediaReaction('[emotion=surprised]えっ！\n(Whoa!)')
  * // => { text: 'えっ！\n(Whoa!)', emotion: 'surprised' }
  */
-export function parseMediaReaction(text: string): { text: string, emotion?: v.InferOutput<typeof emotionSchema>, rejected?: 'length' | 'format' } {
+export function parseMediaReaction(text: string, evidence?: MediaReactionEvidence): { text: string, emotion?: v.InferOutput<typeof emotionSchema>, rejected?: 'length' | 'format' | 'title' | 'replay' } {
   const reply = normalizeWatchingReply(text)
   // The first cue owns the gesture. Remove every cue, including misplaced tags, before captions and speech.
   const cue = /\[emotion=([^\]\r\n]*)\]/.exec(reply)
@@ -102,6 +105,9 @@ export function parseMediaReaction(text: string): { text: string, emotion?: v.In
   // Reject the complete bilingual reply instead of clipping Japanese and leaving a mismatched English caption.
   if (lengths.length > 2 || lengths.some(length => length > 60) || lengths.reduce((sum, length) => sum + length, 0) > 80)
     return { text: '', rejected: 'length' }
+  const unsupported = evidence ? unsupportedMediaClaim(reaction, evidence) : undefined
+  if (unsupported)
+    return { text: '', rejected: unsupported }
   const emotion = v.safeParse(emotionSchema, cue?.[1].trim())
   if (!speechCaption(reaction).trim() || !emotion.success || emotion.output === 'neutral')
     return { text: reaction }

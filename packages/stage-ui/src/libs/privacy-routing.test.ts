@@ -18,7 +18,7 @@ describe('privacy routing', () => {
     expect(prompt).toContain('acoustic opinion')
   })
 
-  it('includes only current authorized cloud comments and drops them after revocation', () => {
+  it('retains identity continuity without using generated comments as evidence', () => {
     const router = new PrivacyRouter({ provider: 'gemini', sessions: {}, cloudHistory: {} })
     const url = 'https://www.youtube.com/watch?v=fixture'
     const owner = { sharingId: 'share', url, recentWords: [], recentEndings: [], recentComments: ['PUBLIC_REACTION'] }
@@ -26,7 +26,7 @@ describe('privacy routing', () => {
     expect(JSON.stringify(router.mediaConversation(router.captureMedia('no-consent', { frames: ['data:image/jpeg;base64,YWJj'] }, undefined, owner)))).not.toContain('PUBLIC_REACTION')
     router.setPublicSharing({ sessionId: 'grant', sharingId: 'share', url, continuity: true, chat: true })
     const request = router.captureMedia('approved', { frames: ['data:image/jpeg;base64,YWJj'] }, undefined, owner)
-    expect(JSON.stringify(router.mediaConversation(request))).toContain('PUBLIC_REACTION')
+    expect(JSON.stringify(router.mediaConversation(request))).not.toContain('PUBLIC_REACTION')
     router.setPublicSharing()
     expect(JSON.stringify(router.mediaConversation(request))).not.toContain('PUBLIC_REACTION')
   })

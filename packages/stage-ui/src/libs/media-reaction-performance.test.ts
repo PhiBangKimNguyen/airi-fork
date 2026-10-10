@@ -5,6 +5,54 @@ import { parseMediaReaction } from './media-reaction-performance'
 import { JapaneseReplySpeech, speechCaption } from './speech/japanese-reply-speech'
 
 describe('media reaction performance', () => {
+  // https://github.com/PhiBangKimNguyen/airi-fork/pull/1
+  // ROOT CAUSE:
+  // Format and length checks accepted invented titles and replay counts. Validate both fields against supplied observations before output.
+  it('rejects the invented Ladies Choice title before speech and memory', () => {
+    const reply = 'ねえ、あの「Ladies\' Choice」で10回も再生してたのって、実はもっと深い意味があるん？\n(I wonder if those replays mean something deeper?)'
+    expect(parseMediaReaction(reply, { titles: ['Город, которого нет'] })).toEqual({ text: '', rejected: 'title' })
+  })
+
+  it.each([
+    '「Город, которого нет」を10回も再生したね。\n(You played "Город, которого нет" ten times.)',
+    'この曲を十回も再生したね。\n(You played this song ten times.)',
+    'この曲、好きだね。\n(You replayed this ten times.)',
+  ])('rejects playback counts without replay evidence: %s', (reply) => {
+    expect(parseMediaReaction(reply, { titles: ['Город, которого нет'] })).toEqual({ text: '', rejected: 'replay' })
+  })
+
+  it.each([
+    ['「Город, которого нет」って、いい曲だね。\n("Город, которого нет" is a lovely song.)', ['Город, которого нет']],
+    ['「Город, которого нет」って、いい曲だね。', ['Игорь Корнелюк. «Город, которого нет».']],
+    ['「イブの記憶」だね。\n(It is "Ib\'s Memory".)', ['イブの記憶']],
+    ['「Memory」だね。\n(It is "Memory".)', ['Artist - Memory (Live)']],
+    ['「Repeat 10 Times」だね。', ['Repeat 10 Times']],
+    ['この曲を再生してくれたんだね。', []],
+  ])('preserves observed titles and ordinary playback remarks: %s', (reply, titles) => {
+    expect(parseMediaReaction(reply, { titles }).text).toBe(reply)
+  })
+
+  it('rejects an invented title in the English caption alone', () => {
+    expect(parseMediaReaction('いい曲だね。\n("Ladies\' Choice" is lovely.)', { titles: ['Город, которого нет'] })).toEqual({ text: '', rejected: 'title' })
+  })
+
+  it.each(['2', '２', '二'])('accepts only a matching observed session count: %s', (count) => {
+    const reply = `この曲を${count}回も聴いたね。\n(You played this two times.)`
+    expect(parseMediaReaction(reply, { titles: [], playsThisSession: 2 }).text).toBe(reply)
+    expect(parseMediaReaction(reply, { titles: [], playsThisSession: 3 }).rejected).toBe('replay')
+  })
+
+  it('rejects caption count changes and unobserved repeated playback', () => {
+    expect(parseMediaReaction('この曲を二回聴いたね。\n(You played this ten times.)', { titles: [], playsThisSession: 2 }).rejected).toBe('replay')
+    expect(parseMediaReaction('何度も聴いてるね。\n(You have this on repeat.)', { titles: [] }).rejected).toBe('replay')
+  })
+
+  it('permits quoted lyric evidence only when supplied and corroborated', () => {
+    const reply = '「自由の余白」って、いい言葉だね。'
+    expect(parseMediaReaction(reply, { titles: [], lyricLines: ['自由の余白がここにある'] }).text).toBe(reply)
+    expect(parseMediaReaction(reply, { titles: [] }).rejected).toBe('title')
+  })
+
   it('removes empty Japanese quotation marks before captions and speech', () => {
     const dialogue = 'ふふ、これは静寂が音を立ててくっつく感じだね。'
     const caption = '(Heh, it\'s like silence makes an actual sound together here.)'
